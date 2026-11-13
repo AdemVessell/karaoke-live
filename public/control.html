@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Karaoke Live — Control Desk</title>
+  <link rel="stylesheet" href="./karaoke.css">
+</head>
+<body class="control-body">
+  <main class="control">
+    <div class="brand"><h1>Karaoke Live</h1><span id="connection" class="status-chip">Stage waiting</span></div>
+    <section class="panel">
+      <label for="youtubeUrl">YouTube song or karaoke video</label>
+      <div class="row"><input id="youtubeUrl" type="text" autocomplete="off" placeholder="https://youtu.be/…"><button id="load" class="primary">Load</button></div>
+      <div id="songMessage" class="status" aria-live="polite">Paste a link, then load it into the stage.</div>
+      <div class="controls"><button id="play">Play</button><button id="pause">Pause</button><button id="restart">Restart</button></div>
+    </section>
+    <section class="panel">
+      <div class="row"><button id="enableMedia" class="primary">Enable camera &amp; microphone</button><span id="mediaStatus" class="status-chip">Microphone off</span></div>
+      <div class="meter" aria-label="Mic level"><i id="micMeter"></i></div>
+      <div id="latencyInfo" class="hint">Low-latency monitoring · SSL headphones</div>
+      <div id="clipStatus" class="hint">Waiting for the microphone.</div>
+      <div class="hint" style="margin-top:10px">Use headphones connected to your selected output. Hardware direct monitoring can double the dry voice; use one monitoring path.</div>
+    </section>
+    <section class="panel device-panel">
+      <div class="row"><strong>Audio devices</strong><button id="refreshDevices" type="button">Refresh devices</button></div>
+      <label for="micDevice">Microphone input</label>
+      <select id="micDevice"><option value="">System default</option></select>
+      <label for="outputDevice">Voice monitoring output</label>
+      <select id="outputDevice"><option value="">System default</option></select>
+      <div class="hint">YouTube follows macOS sound output; set macOS to the same headphones.</div>
+      <div class="row device-actions"><button id="applyDevices" type="button">Apply devices</button><span id="deviceMessage" class="hint">Apply while capture is stopped.</span></div>
+    </section>
+    <section class="panel">
+      <div class="slider-line"><span>Voice</span><input id="voice" type="range" min="-12" max="18" step="1" value="0"><output id="voiceValue">0 dB</output></div>
+      <div class="slider-line"><span>Music</span><input id="music" type="range" min="0" max="100" step="1" value="65"><output id="musicValue">65%</output></div>
+      <div class="slider-line"><span>Reverb</span><input id="reverb" type="range" min="0" max="60" step="1" value="8"><output id="reverbValue">8%</output></div>
+      <label class="check"><input id="compression" type="checkbox" checked> Gentle vocal compression</label>
+      <details class="voice-effects"><summary>Voice effects</summary>
+        <div class="slider-line advanced-effect"><span>Compression strength</span><input data-advanced-effect id="compressionAmount" type="range" min="0" max="100" step="1" value="35"><output id="compressionAmountValue">35%</output></div>
+        <div class="slider-line advanced-effect"><span>Threshold</span><input data-advanced-effect id="compressionThreshold" type="range" min="-40" max="0" step="1" value="-20"><output id="compressionThresholdValue">-20 dB</output></div>
+        <div class="slider-line advanced-effect"><span>Ratio</span><input data-advanced-effect id="compressionRatio" type="range" min="1" max="8" step="0.5" value="3"><output id="compressionRatioValue">3:1</output></div>
+        <div class="slider-line advanced-effect"><span>Makeup</span><input data-advanced-effect id="compressionMakeup" type="range" min="0" max="12" step="1" value="0"><output id="compressionMakeupValue">0 dB</output></div>
+        <div class="slider-line advanced-effect"><span>Attack</span><input data-advanced-effect id="compressionAttack" type="range" min="1" max="30" step="1" value="5"><output id="compressionAttackValue">5 ms</output></div>
+        <div class="slider-line advanced-effect"><span>Release</span><input data-advanced-effect id="compressionRelease" type="range" min="40" max="400" step="1" value="120"><output id="compressionReleaseValue">120 ms</output></div>
+        <div class="slider-line advanced-effect"><span>Reverb decay</span><input data-advanced-effect id="reverbDecay" type="range" min="0.3" max="3" step="0.1" value="1.2"><output id="reverbDecayValue">1.2 s</output></div>
+        <div class="slider-line advanced-effect"><span>Reverb pre-delay</span><input data-advanced-effect id="reverbPredelay" type="range" min="0" max="60" step="1" value="12"><output id="reverbPredelayValue">12 ms</output></div>
+        <div class="slider-line advanced-effect"><span>Reverb tone</span><input data-advanced-effect id="reverbTone" type="range" min="2000" max="12000" step="100" value="8000"><output id="reverbToneValue">8000 Hz</output></div>
+        <div class="slider-line advanced-effect"><span>Echo amount</span><input data-advanced-effect id="delayMix" type="range" min="0" max="25" step="1" value="0"><output id="delayMixValue">0%</output></div>
+        <div class="slider-line advanced-effect"><span>Echo time</span><input data-advanced-effect id="delayMs" type="range" min="80" max="500" step="1" value="220"><output id="delayMsValue">220 ms</output></div>
+        <div class="slider-line advanced-effect"><span>Peak ceiling</span><input data-advanced-effect id="limiterDb" type="range" min="-12" max="-1" step="1" value="-1"><output id="limiterDbValue">-1 dB</output></div>
+        <div id="effectsNotice" class="hint" hidden>Extra controls available next session.</div>
+      </details>
+    </section>
+    <section class="panel">
+      <div class="row"><button id="obsSetup">Set up OBS</button><button id="record" class="primary">Record in OBS</button><button id="stop">Stop capture</button></div>
+      <div id="obsStatus" class="status" aria-live="polite">OBS not checked.</div>
+    </section>
+    <section class="panel"><div class="hint">Use a karaoke or instrumental version. Keep the Stage window open while recording. Stop capture ends local capture; it does not end a public broadcast.</div></section>
+  </main>
+  <script type="module" src="./control.js"></script>
+</body>
+</html>

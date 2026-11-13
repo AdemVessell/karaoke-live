@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Karaoke Live — Stage</title><link rel="stylesheet" href="./karaoke.css"></head>
+<body class="stage-body">
+  <main class="stage" aria-label="Karaoke Live stage">
+    <section class="camera-panel"><video id="camera" autoplay playsinline muted></video><div id="cameraPlaceholder" class="placeholder"><span class="placeholder-mark">●</span><span>Camera waiting</span></div><div class="stage-label">LIVE VOCALS</div><div id="micStatus" class="stage-status">Mic off</div></section>
+    <section class="song-panel"><div id="player" class="youtube-player"></div><div class="song-footer"><span id="songStatus">Paste a YouTube song in the control desk</span><span id="audioStatus">System audio output</span></div></section>
+  </main>
+  <script type="module" src="./stage.js"></script>
+</body></html>

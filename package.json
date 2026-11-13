@@ -1,0 +1,27 @@
+{
+  "name": "karaoke-live",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "main.cjs",
+  "scripts": {
+    "test": "node --test tests/*.test.js tests/*.test.cjs",
+    "start": "electron .",
+    "package:source": "python3 scripts/package-source.py",
+    "package:mac": "python3 build-app.py",
+    "test:browser": "node --test tests/*.browser.mjs"
+  },
+  "devDependencies": {
+    "electron": "45.3.1",
+    "playwright": "1.65.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "description": "A macOS karaoke stage with live vocal effects, YouTube playback, and OBS recording.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AdemVessell/karaoke-live.git"
+  }
+}
