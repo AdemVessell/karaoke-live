@@ -59,8 +59,9 @@ test('control uses the actual Stage field and device contract', async () => {
   const { server, commands } = makeMockServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
+  let browser;
   try {
+    browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${address.port}/control.html`);
     await page.waitForFunction(() => document.querySelector('#micDevice option[value="mic-a"]'));
@@ -94,7 +95,7 @@ test('control uses the actual Stage field and device contract', async () => {
     assert.deepEqual(payloads.setDevices, { inputDeviceId: 'mic-a', outputDeviceId: 'out-a' });
     assert.ok(!commands.some(item => JSON.stringify(item).includes('cameraDevice')));
   } finally {
-    await browser.close();
+    await browser?.close();
     await new Promise(resolve => server.close(resolve));
   }
 });

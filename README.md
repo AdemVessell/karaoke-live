@@ -12,6 +12,7 @@ The private Control Desk holds the song and audio controls. The Stage shows your
 - Keeps music and voice levels separately adjustable.
 - Creates an OBS scene that captures the Stage window **and its processed audio**.
 - Records locally through OBS. Starting a public broadcast remains a deliberate action in OBS and your streaming service.
+- Saves an optional broadcast lip-sync adjustment without delaying headphone monitoring.
 
 No OpenAI, Nuance, or other paid API key is needed. No particular audio interface is required.
 
@@ -68,6 +69,20 @@ The voice runs at 48 kHz through a mono input fold, high-pass filter, compressor
 
 The compressor adds no algorithmic lookahead. Device, operating-system, and audio-buffer latency still vary. Headphone monitoring does not pass through OBS.
 
+## Lip sync (optional)
+
+If your recorded playback already looks aligned, leave this at **Already aligned / 0 ms**.
+
+1. Enable your camera and microphone, then use **Set up OBS**. Pause the song and record a short test with a few visible claps using **Record in OBS**.
+2. **Stop & save**, then use **Show recording** to find the file. Review it in a player that supports your OBS recording format. Check the actual recording, not the headphone sound or OBS preview.
+3. Open **Lip sync (optional)**. Choose whether you hear your voice first or see your mouth move first, set a small correction, and **Apply**. Record another short test. **Reset** restores zero.
+
+This is manual calibration, not automatic lip reading or delay measurement. The setting is saved on this Mac and applied by **Set up OBS** in each new session. Adjustments are blocked while OBS records or streams. Recheck after changing a camera, audio device, or capture setup. A fixed offset cannot repair a connection whose timing keeps drifting.
+
+The adjustment affects only the OBS recording/stream. Your processed voice and song still go directly to your headphones with the same monitoring path. To preserve the song's own picture/sound timing, OBS uses a muted camera overlay when correction is enabled. The base Stage remains the only audible source. Seeing the mouth first delays the camera; hearing the voice first delays the broadcast mix and song picture together. The direct Stage window stays responsive and does not show this broadcast correction.
+
+The supported range is 0–500 ms in either direction; picture timing is limited by the video frame rate. Keep the app-created OBS sources and filters intact. Stage resizing is locked while a nonzero correction is applied; reset to zero before resizing, then run setup again.
+
 ## OBS audio: one path
 
 Use **Karaoke Stage**, the macOS window-capture source, for picture **and audio**. Keep it unmuted, on track 1, with OBS monitoring off. The old `Karaoke App Audio` source, if present, stays muted. Targeting Electron's parent application as a separate audio source can capture silence; targeting a generic helper can capture unrelated applications.
@@ -84,6 +99,7 @@ Some videos disallow embedding or are unavailable. The app reports those errors 
 
 - OBS authentication is read from your own local OBS configuration and is never included in the source package.
 - Song and device preferences stay in the app's local browser storage.
+- The broadcast sync setting stays in the app's local data folder; it is separate from voice effects and device preferences.
 - The HTTP control server binds to `127.0.0.1` and checks request origin/host.
 - Recordings go to `Desktop/Karaoke Recordings` unless OBS manages a recording started outside the app.
 - Source archives exclude recordings, local evidence, runtime files, credentials, and dependencies.

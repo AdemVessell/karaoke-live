@@ -16,6 +16,9 @@ const RANGE_FIELDS = [
 
 let settings = { ...DEFAULTS, ...DEVICE_DEFAULTS, videoUrl: '' };
 let captureActive = false, statusReceived = false, effectsSupported = false, stageSettingsSynced = false;
+let obsState = { connected: false, recording: false, streaming: false };
+let obsStatusKnown = false;
+let syncOffsetMs = 0, syncDirty = false, syncLoaded = false, syncPending = false, syncRequestId = 0;
 try { settings = { ...settings, ...JSON.parse(localStorage.getItem(storeKey) || '{}') }; } catch {}
 settings = { ...settings, ...normalizeVoiceSettings(settings) };
 settings.inputDeviceId = String(settings.inputDeviceId || '');
@@ -29,6 +32,116 @@ function save() {
 function message(text, error = false) {
   $('songMessage').textContent = text;
   $('songMessage').classList.toggle('danger', error);
+}
+
+function clampSyncOffset(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(-500, Math.min(500, Math.round(number / 10) * 10));
+}
+
+function syncOffsetFromEditor() {
+  const amount = Math.max(0, Math.min(500, Number($('syncAmount')?.value || 0)));
+  const direction = $('syncDirection')?.value || 'aligned';
+  return clampSyncOffset(direction === 'voice-first' ? -amount : direction === 'picture-first' ? amount : 0);
+}
+
+function syncEditorFromOffset(offsetMs) {
+  syncOffsetMs = clampSyncOffset(offsetMs);
+  const direction = syncOffsetMs < 0 ? 'voice-first' : syncOffsetMs > 0 ? 'picture-first' : 'aligned';
+  $('syncDirection').value = direction;
+  $('syncAmount').value = Math.abs(syncOffsetMs);
+  renderSyncMeaning();
+}
+
+function renderSyncMeaning() {
+  const offset = syncOffsetFromEditor();
+  $('syncAmountValue').textContent = `${Math.abs(offset)} ms`;
+  $('syncMeaning').textContent = offset > 0
+    ? `Camera will be delayed ${offset} ms in the OBS stream/recording.`
+    : offset < 0
+      ? `Broadcast mix + song picture will be delayed ${Math.abs(offset)} ms.`
+      : 'No correction.';
+}
+
+function setSyncStatus(text, error = false) {
+  const element = $('syncStatus');
+  if (!element) return;
+  element.textContent = text;
+  element.classList.toggle('danger', error);
+}
+
+function renderSyncResponse(data, fallback) {
+  const text = data.message || fallback;
+  const needsAttention = data.applied === false || data.stale === true;
+  setSyncStatus(needsAttention ? `Lip sync needs attention: ${text}` : text, needsAttention);
+  return !needsAttention;
+}
+
+function syncBusy() {
+  return Boolean(obsState.recording || obsState.streaming);
+}
+
+function updateObsState(data = {}) {
+  obsStatusKnown = true;
+  obsState = { ...obsState, connected: data.connected !== false, recording: Boolean(data.recording), streaming: Boolean(data.streaming) };
+  updateSyncAvailability();
+}
+
+function updateSyncAvailability() {
+  const busy = syncBusy();
+  const unavailable = obsStatusKnown && obsState.connected === false;
+  for (const control of [$('syncDirection'), $('syncAmount')]) if (control) control.disabled = syncPending || busy;
+  for (const control of [$('applySync'), $('resetSync')]) if (control) control.disabled = syncPending || busy || unavailable;
+  if (busy && !syncPending) {
+    setSyncStatus(obsState.streaming ? 'Stop the OBS stream before applying lip sync.' : 'Stop the OBS recording before applying lip sync.', true);
+  } else if (unavailable && !syncPending) {
+    setSyncStatus('OBS status unavailable. Check OBS before applying lip sync.', true);
+  }
+}
+
+async function loadSavedSync() {
+  const requestId = ++syncRequestId;
+  try {
+    const data = await obs('sync');
+    if (requestId !== syncRequestId || syncDirty) return;
+    syncLoaded = true;
+    syncOffsetMs = clampSyncOffset(data.offsetMs);
+    syncEditorFromOffset(syncOffsetMs);
+    renderSyncResponse(data, 'Saved lip-sync setting loaded.');
+  } catch (error) {
+    if (requestId !== syncRequestId) return;
+    syncLoaded = false;
+    setSyncStatus(`Lip sync unavailable: ${error.message}`, true);
+  }
+  updateSyncAvailability();
+}
+
+async function applySyncOffset(offsetMs, label = 'Lip-sync setting saved.') {
+  if (syncBusy()) {
+    updateSyncAvailability();
+    return;
+  }
+  const requestId = ++syncRequestId;
+  const requestedOffset = clampSyncOffset(offsetMs);
+  syncPending = true;
+  updateSyncAvailability();
+  setSyncStatus('Applying to OBS…');
+  try {
+    const data = await obs('sync', { offsetMs: requestedOffset });
+    if (requestId !== syncRequestId) return;
+    syncLoaded = true;
+    syncOffsetMs = clampSyncOffset(data.offsetMs);
+    syncEditorFromOffset(syncOffsetMs);
+    if (renderSyncResponse(data, label)) syncDirty = false;
+  } catch (error) {
+    if (requestId === syncRequestId) setSyncStatus(`Lip sync not applied: ${error.message}`, true);
+  } finally {
+    if (requestId === syncRequestId) {
+      syncPending = false;
+      updateSyncAvailability();
+    }
+  }
 }
 
 const command = async (name, payload = {}) => {
@@ -106,6 +219,7 @@ function updateStatus(data = {}) {
     stageSettingsSynced = true;
     if (!captureActive) command('syncSettings', { ...settings });
   }
+  updateSyncAvailability();
 }
 
 function bindRange(id, key, suffix) {
@@ -133,8 +247,39 @@ $('applyDevices').onclick = () => captureActive ? message('Stop capture before c
 for (const [id, key] of [['micDevice', 'inputDeviceId'], ['outputDevice', 'outputDeviceId']]) $(id)?.addEventListener('change', event => { settings[key] = event.target.value; save(); });
 
 function obs(path, body) { return fetch(`/api/obs/${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || 'OBS request failed.'); return data; }); }
-$('obsSetup').onclick = async () => { try { const data = await obs('setup', {}); $('obsStatus').textContent = data.error || (data.connected ? 'OBS scene ready.' : 'OBS unavailable.'); } catch (error) { $('obsStatus').textContent = error.message; } };
-$('record').onclick = async () => { try { const current = await obs('status'); const data = await obs('record', { action: current.recording ? 'stop' : 'start' }); $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS'; $('obsStatus').textContent = data.savedPath ? `Saved: ${data.savedPath}` : (data.message || 'OBS updated.'); } catch (error) { $('obsStatus').textContent = error.message; } };
+function appRoute(path, body = {}) { return fetch(`/api/app/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || 'App request failed.'); return data; }); }
+
+function showSavedRecording(data) {
+  if (!data?.savedPath) return;
+  const button = $('showRecording');
+  button.hidden = false;
+  button.dataset.savedPath = data.savedPath;
+}
+
+$('obsSetup').onclick = async () => { try { const data = await obs('setup', {}); updateObsState(data); $('obsStatus').textContent = data.error || (data.connected ? 'OBS scene ready.' : 'OBS unavailable.'); if (data.connected) loadSavedSync(); } catch (error) { updateObsState({ connected: false }); $('obsStatus').textContent = error.message; } };
+$('record').onclick = async () => { try { const current = await obs('status'); updateObsState(current); const data = await obs('record', { action: current.recording ? 'stop' : 'start' }); updateObsState(data); $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS'; showSavedRecording(data); $('obsStatus').textContent = data.savedPath ? `Saved: ${data.savedPath}` : (data.message || 'OBS updated.'); } catch (error) { $('obsStatus').textContent = error.message; } };
+$('showRecording').onclick = async () => { try { await appRoute('show-recording'); $('obsStatus').textContent = 'Showing the saved recording.'; } catch (error) { $('obsStatus').textContent = error.message; } };
+
+$('syncDirection').onchange = () => {
+  if ($('syncDirection').value === 'aligned') $('syncAmount').value = '0';
+  syncDirty = true;
+  renderSyncMeaning();
+  setSyncStatus('Unsaved lip-sync change.');
+};
+$('syncAmount').oninput = () => {
+  if (Number($('syncAmount').value) > 0 && $('syncDirection').value === 'aligned') $('syncDirection').value = 'picture-first';
+  syncDirty = true;
+  renderSyncMeaning();
+  setSyncStatus('Unsaved lip-sync change.');
+};
+$('applySync').onclick = () => applySyncOffset(syncOffsetFromEditor());
+$('resetSync').onclick = () => {
+  syncDirty = true;
+  syncEditorFromOffset(0);
+  applySyncOffset(0, 'Lip sync reset.');
+};
+syncEditorFromOffset(0);
+loadSavedSync();
 
 bus.on(messageData => { if (messageData?.type === 'status') updateStatus(messageData.data); });
 command('requestStatus');
@@ -142,15 +287,20 @@ command('requestStatus');
 async function karaokeRefreshObs() {
   try {
     const data = await obs('status');
+    updateObsState(data);
     $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS';
     $('obsStatus').textContent = data.streaming ? 'OBS is streaming.' : data.recording ? 'OBS recording.' : data.correctScene ? 'OBS ready.' : 'Select Karaoke Live in OBS.';
-  } catch (error) { $('obsStatus').textContent = error.message; }
+  } catch (error) {
+    updateObsState({ connected: false, recording: false, streaming: false });
+    $('obsStatus').textContent = error.message;
+  }
 }
 
 $('stop').onclick = async () => {
   try {
     const current = await obs('status');
-    if (current.recording) { const saved = await obs('record', { action: 'stop' }); $('obsStatus').textContent = saved.savedPath ? `Saved: ${saved.savedPath}` : (saved.message || 'Recording stopped.'); }
+    updateObsState(current);
+    if (current.recording) { const saved = await obs('record', { action: 'stop' }); updateObsState(saved); showSavedRecording(saved); $('obsStatus').textContent = saved.savedPath ? `Saved: ${saved.savedPath}` : (saved.message || 'Recording stopped.'); }
   } catch (error) { $('obsStatus').textContent = error.message; }
   finally { $('record').textContent = 'Record in OBS'; command('stop'); }
 };

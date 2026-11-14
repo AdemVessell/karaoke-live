@@ -54,7 +54,27 @@
     </section>
     <section class="panel">
       <div class="row"><button id="obsSetup">Set up OBS</button><button id="record" class="primary">Record in OBS</button><button id="stop">Stop capture</button></div>
+      <div class="recording-actions"><button id="showRecording" type="button" hidden>Show recording</button></div>
       <div id="obsStatus" class="status" aria-live="polite">OBS not checked.</div>
+    </section>
+    <section class="panel sync-panel">
+      <details id="syncDetails">
+        <summary>Lip sync (optional)</summary>
+        <div class="sync-copy">
+          <p>Use <strong>Record in OBS</strong>, clap in view, then choose <strong>Stop &amp; save</strong>. Review the recording and adjust only if needed. There is no automatic calibration.</p>
+          <p>Only the OBS stream/recording changes. Headphones stay immediate.</p>
+        </div>
+        <label for="syncDirection">What do you notice?</label>
+        <select id="syncDirection">
+          <option value="aligned">Already aligned</option>
+          <option value="voice-first">Hear voice first</option>
+          <option value="picture-first">See mouth move first</option>
+        </select>
+        <div class="slider-line sync-slider"><span>Amount</span><input id="syncAmount" type="range" min="0" max="500" step="10" value="0"><output id="syncAmountValue">0 ms</output></div>
+        <div id="syncMeaning" class="hint" aria-live="polite">No correction.</div>
+        <div class="row sync-actions"><button id="applySync" class="primary" type="button">Apply</button><button id="resetSync" type="button">Reset</button></div>
+        <div id="syncStatus" class="status" aria-live="polite">Checking saved lip-sync setting…</div>
+      </details>
     </section>
     <section class="panel"><div class="hint">Use a karaoke or instrumental version. Keep the Stage window open while recording. Stop capture ends local capture; it does not end a public broadcast.</div></section>
   </main>

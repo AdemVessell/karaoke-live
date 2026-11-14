@@ -4,16 +4,30 @@ const fs=require('node:fs/promises');
 const path=require('node:path');
 const {homedir}=require('node:os');
 const {connectObs}=require('./lib/obs-connector.cjs');
+const {syncPlan,applySync,matchesSync}=require('./lib/obs-sync.cjs');
 const PORT=4318,ORIGIN=`http://127.0.0.1:${PORT}`,SCENE='Karaoke Live',SCREEN='Karaoke Stage',AUDIO='Karaoke App Audio',BUNDLE='org.stevenson.karaoke-live';
 app.setName('Karaoke Live');app.setPath('userData',process.env.KARAOKE_USER_DATA_DIR ? path.resolve(process.env.KARAOKE_USER_DATA_DIR) : path.join(app.getPath('appData'),'Karaoke Live'));
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
-let stage,control,server,ownedRecording=false,previousRecordDirectory=null,quitting=false,quitReady=false;
+let stage,control,server,ownedRecording=false,previousRecordDirectory=null,quitting=false,quitReady=false,lastRecordingPath=null;
+let syncOffsetMs=0,syncApplied=false,obsMutation=Promise.resolve();
+const syncFile=()=>path.join(app.getPath('userData'),'broadcast-sync.json');
+async function loadSync(){try{const saved=JSON.parse(await fs.readFile(syncFile(),'utf8'));syncOffsetMs=syncPlan(saved.offsetMs).offsetMs;}catch{syncOffsetMs=0;}}
+async function saveSync(offsetMs){const filename=syncFile();await fs.mkdir(path.dirname(filename),{recursive:true});await fs.writeFile(filename+'.tmp',JSON.stringify({offsetMs})+'\n',{mode:0o600});await fs.rename(filename+'.tmp',filename);}
+function serializeObs(operation){const next=obsMutation.then(operation,operation);obsMutation=next.catch(()=>{});return next;}
+function lockSyncSize(){const resize=syncOffsetMs===0;stage.setResizable(resize);stage.setMaximizable(resize);stage.setFullScreenable(resize);}
+async function stageLayout(){if(!stage||stage.isDestroyed())throw Error('Open the Stage window first.');return stage.webContents.executeJavaScript('window.__karaoke.getLayout()');}
+async function applyBroadcastSync(o,offsetMs){
+ syncPlan(offsetMs);if(ownedRecording)throw Error('Stop recording and streaming before adjusting lip sync.');const previous=syncOffsetMs;syncApplied=false;
+ try{await applySync(o,offsetMs,await stageLayout());await saveSync(offsetMs);syncOffsetMs=offsetMs;syncApplied=true;lockSyncSize();}
+ catch(error){try{await applySync(o,previous,await stageLayout());syncApplied=true;}catch{}throw error;}
+ return {offsetMs:syncOffsetMs,applied:syncApplied,message:syncOffsetMs===0?'No sync correction. Headphones unchanged.':'Saved and applied to OBS only. Headphones unchanged.'};
+}
 const ownOrigin=url=>{try{return new URL(url).origin===ORIGIN;}catch{return false;}};
 async function obsConnection(){return connectObs();}
 async function obsStatus(o){const [r,s,c]=await Promise.all([o.request('GetRecordStatus'),o.request('GetStreamStatus'),o.request('GetCurrentProgramScene')]);return {connected:true,recording:r.outputActive,streaming:s.outputActive,scene:c.currentProgramSceneName,correctScene:c.currentProgramSceneName===SCENE,recordTimecode:r.outputTimecode};}
 async function ensureInput(o,inputName,inputKind,inputSettings){const list=await o.request('GetInputList');if(!list.inputs.some(i=>i.inputName===inputName))await o.request('CreateInput',{sceneName:SCENE,inputName,inputKind,inputSettings,sceneItemEnabled:true});else{await o.request('SetInputSettings',{inputName,inputSettings,overlay:true});const items=await o.request('GetSceneItemList',{sceneName:SCENE});if(!items.sceneItems.some(i=>i.sourceName===inputName))await o.request('CreateSceneItem',{sceneName:SCENE,sourceName:inputName,sceneItemEnabled:true});}}
 async function setupObs(o){
- const s=await obsStatus(o);if(s.recording||s.streaming)throw Error('Stop the current OBS recording or stream before setting up karaoke.');
+ const s=await obsStatus(o);if(ownedRecording||s.recording||s.streaming)throw Error('Stop the current OBS recording or stream before setting up karaoke.');
  const scenes=await o.request('GetSceneList');if(!scenes.scenes.some(x=>x.sceneName===SCENE))await o.request('CreateScene',{sceneName:SCENE});
  await ensureInput(o,SCREEN,'screen_capture',{type:1,show_cursor:false,show_empty_names:false,show_hidden_windows:true});
  const windows=await o.request('GetInputPropertiesListPropertyItems',{inputName:SCREEN,propertyName:'window'});
@@ -31,6 +45,7 @@ async function setupObs(o){
  const video=await o.request('GetVideoSettings');const item=await o.request('GetSceneItemId',{sceneName:SCENE,sourceName:SCREEN});
  await o.request('SetSceneItemTransform',{sceneName:SCENE,sceneItemId:item.sceneItemId,sceneItemTransform:{positionX:0,positionY:0,boundsType:'OBS_BOUNDS_SCALE_INNER',boundsWidth:video.baseWidth,boundsHeight:video.baseHeight,boundsAlignment:0,alignment:5}});
  await o.request('SetCurrentProgramScene',{sceneName:SCENE});
+ await applyBroadcastSync(o,syncOffsetMs);
  return {...await obsStatus(o),message:'Karaoke Stage and app audio connected. OBS monitoring stays off to avoid echo.'};
 }
 async function api(route,body){
@@ -44,10 +59,13 @@ async function api(route,body){
  }
  if(route==='/api/app/show-stage'){stage.show();stage.focus();return {ok:true};}
  if(route==='/api/app/show-controls'){control.show();control.focus();return {ok:true};}
+ if(route==='/api/app/show-recording'){if(!lastRecordingPath)throw Error('No recording saved in this session yet.');await fs.access(lastRecordingPath);shell.showItemInFolder(lastRecordingPath);return {ok:true};}
+ if(route==='/api/obs/sync'&&body.offsetMs===undefined){let o;try{o=await obsConnection();const applied=syncApplied&&await matchesSync(o,syncOffsetMs);return {offsetMs:syncOffsetMs,applied,message:applied?'Applied to OBS. Headphones unchanged.':'Saved. Use Set up OBS to apply for this session.'};}catch{return {offsetMs:syncOffsetMs,applied:false,message:'Saved. Open OBS and use Set up OBS before recording.'};}finally{o?.close();}}
  if(route==='/api/app/status'){const stageOpen=!!stage&&!stage.isDestroyed();const stageStatus=stageOpen?await stage.webContents.executeJavaScript('({status:window.__karaoke?.getStatus?.()||null,actualTracks:Array.from(document.getElementById("camera")?.srcObject?.getTracks?.()||[]).map(t=>({kind:t.kind,readyState:t.readyState,enabled:t.enabled}))})'):null;return {app:'Karaoke Live',stageOpen,sampleRate:48000,stageStatus,selectedVideo:control&&!control.isDestroyed()?await control.webContents.executeJavaScript('document.getElementById("youtubeUrl")?.value||""'):''};}
  const o=await obsConnection();try{
   if(route==='/api/obs/status')return await obsStatus(o);
   if(route==='/api/obs/setup')return await setupObs(o);
+  if(route==='/api/obs/sync')return await applyBroadcastSync(o,body.offsetMs);
   if(route==='/api/obs/record'){
    let s=await obsStatus(o);
    if(body.action==='start'){
@@ -57,7 +75,7 @@ async function api(route,body){
    }
    if(body.action==='stop'){
     if(!s.recording)return {...s,message:'Recording already stopped.'};if(!ownedRecording)throw Error('This recording was started outside Karaoke Live. Stop it in OBS.');
-    const result=await o.request('StopRecord');ownedRecording=false;if(previousRecordDirectory)await o.request('SetRecordDirectory',{recordDirectory:previousRecordDirectory}).catch(()=>{});previousRecordDirectory=null;return {...await obsStatus(o),savedPath:result.outputPath,message:'Recording saved.'};
+    const result=await o.request('StopRecord');ownedRecording=false;lastRecordingPath=result.outputPath;if(previousRecordDirectory)await o.request('SetRecordDirectory',{recordDirectory:previousRecordDirectory}).catch(()=>{});previousRecordDirectory=null;return {...await obsStatus(o),savedPath:result.outputPath,message:'Recording saved.'};
    }
   }
   throw Error('Unknown karaoke request.');
@@ -70,9 +88,9 @@ async function startServer(){
   if(url.pathname.startsWith('/api/')){
    if(req.method!=='GET'&&req.method!=='POST'){res.writeHead(405).end();return;}
    if(req.headers.origin&&!ownOrigin(req.headers.origin)||req.headers['sec-fetch-site']==='cross-site'){res.writeHead(403).end();return;}
-   if(req.method==='GET'&&!['/api/obs/status','/api/app/status'].includes(url.pathname)){res.writeHead(405).end();return;}
+   if(req.method==='GET'&&!['/api/obs/status','/api/obs/sync','/api/app/status'].includes(url.pathname)){res.writeHead(405).end();return;}
    let body={};if(req.method==='POST'){if(!String(req.headers['content-type']).startsWith('application/json')){res.writeHead(415).end();return;}let raw='';for await(const b of req){raw+=b;if(raw.length>8192)throw Error('Request too large.');}body=JSON.parse(raw||'{}');}
-   let result;try{result=await api(url.pathname,body);}catch(e){res.writeHead(503,{'Content-Type':'application/json'}).end(JSON.stringify({connected:false,error:e.message}));return;}
+   let result;try{result=await(req.method==='POST'&&url.pathname.startsWith('/api/obs/')?serializeObs(()=>api(url.pathname,body)):api(url.pathname,body));}catch(e){res.writeHead(503,{'Content-Type':'application/json'}).end(JSON.stringify({connected:false,error:e.message}));return;}
    res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify(result));return;
   }
   const filename=decodeURIComponent(url.pathname==='/'?'/control.html':url.pathname);const root=path.join(__dirname,'public'),file=path.resolve(root,'.'+filename);
@@ -90,7 +108,7 @@ if(!app.requestSingleInstanceLock())app.quit();else{
   session.defaultSession.webRequest.onBeforeSendHeaders({urls:['https://www.youtube.com/embed/*','https://www.youtube-nocookie.com/embed/*']},(details,callback)=>{const headers={...details.requestHeaders};for(const key of Object.keys(headers))if(key.toLowerCase()==='referer')delete headers[key];headers.Referer=`https://${BUNDLE}/`;callback({requestHeaders:headers});});
   session.defaultSession.setPermissionRequestHandler((contents,permission,callback,details)=>callback(ownOrigin(details.requestingUrl||contents.getURL())&&['media','speaker-selection'].includes(permission)));
   session.defaultSession.setPermissionCheckHandler((contents,permission,origin)=>ownOrigin(origin)&&['media','speaker-selection'].includes(permission));
-  await startServer();
+  await loadSync();await startServer();
   stage=new BrowserWindow({title:'Karaoke Live — Stage',width:1280,height:720,useContentSize:true,frame:false,backgroundColor:'#101119',resizable:true,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});stage.setAspectRatio(16/9);protect(stage);await stage.loadURL(ORIGIN+'/stage.html');
   stage.on('page-title-updated',event=>event.preventDefault());
   control=new BrowserWindow({title:'Karaoke Live — Controls',width:460,height:830,minWidth:400,minHeight:660,backgroundColor:'#101119',webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});protect(control);await control.loadURL(ORIGIN+'/control.html');control.focus();

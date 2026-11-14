@@ -121,7 +121,7 @@ function execute(command, payload = {}) {
 }
 bus.on(message => { if (message?.type === 'command') execute(message.command, message.payload); });
 setInterval(() => { if (chain && audio) { const values = new Float32Array(chain.analyser.fftSize); chain.analyser.getFloatTimeDomainData(values); let sum = 0, peak = 0; for (const value of values) { sum += value * value; peak = Math.max(peak, Math.abs(value)); } const rms = Math.sqrt(sum / values.length) || 1e-7; setStatus({ micDb: 20 * Math.log10(rms), clip: peak >= 0.98 }); } else publish(); }, 500);
-window.__karaoke = { getStatus: () => ({ ...status, queuedVideo: settings.videoId || null, playbackTime:player?.getCurrentTime?.()||0, playbackState:player?.getPlayerState?.()??null }), getDevices: () => ({ ...status.devices }), execute };
+window.__karaoke = { getStatus: () => ({ ...status, queuedVideo: settings.videoId || null, playbackTime:player?.getCurrentTime?.()||0, playbackState:player?.getPlayerState?.()??null }), getDevices: () => ({ ...status.devices }), getLayout: () => { const left=document.querySelector('.camera-panel').getBoundingClientRect(),right=document.querySelector('.song-panel').getBoundingClientRect();return {width:innerWidth,height:innerHeight,splitX:(left.right+right.left)/2}; }, execute };
 window.addEventListener('beforeunload', stopAll);
 void refreshDevices().catch(() => {});
 publish();
