@@ -1,6 +1,6 @@
 # Validation and remaining checks
 
-Version 0.3.0 is a macOS prototype. The checks and remaining limits are described below.
+Karaoke Live is a macOS prototype. The checks and remaining limits are described below.
 
 ## Observed working
 
@@ -27,6 +27,12 @@ Version 0.3.0 is a macOS prototype. The checks and remaining limits are describe
 - The first OBS check exposed an invalid cached window on the duplicate capture. Refreshing that source's available-window list before selecting the current Stage fixed the blank overlay. The test was rerun after the repair.
 - Synthetic capture audio was silent at baseline and all offsets in this test environment. Those files establish the picture shift and OBS setting application, not complete audio/video alignment. The SSL interface was disconnected; a real clap/playback check with the intended microphone and headphones remains required before relying on a nonzero correction.
 - The headphone DSP and output route are unchanged. Sync is implemented in OBS only; it does not add an audio delay node to the app.
+
+## Website capture and vocal presets (0.4.0)
+
+- A local OBS test recorded a Chrome window playing a public Suno track. The saved 1080p30 file decoded with non-silent 48 kHz, 24-bit stereo PCM. The camera and microphone were off for that test.
+- Automated checks cover selecting the Chrome window, routing browser audio and processed voice, starting and stopping a recording, and returning to YouTube mode. Only Google Chrome is supported in Website mode. Its audio capture covers all Chrome tabs.
+- Browser tests exercise editing, switching, restoring, and resetting the six vocal presets with simulated capture. A short live take is still needed to check vocal balance and lip sync with the intended hardware.
 
 ## Boundaries
 

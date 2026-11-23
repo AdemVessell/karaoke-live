@@ -1,8 +1,11 @@
-import { createBus, parseYouTubeUrl, DEFAULTS, normalizeVoiceSettings } from './common.js';
+import { createBus, parseYouTubeUrl, DEFAULTS, normalizeVoiceSettings, compressionPresetFromAmount } from './common.js';
+import { VOCAL_PRESETS, vocalSettings } from './vocal-presets.js';
 
 const $ = id => document.getElementById(id);
 const bus = createBus();
 const storeKey = 'karaoke-live-settings';
+const presetStoreKey = 'karaoke-live-vocal-presets';
+const presetButtons = [...document.querySelectorAll('[data-vocal-preset]')];
 const DEVICE_DEFAULTS = { inputDeviceId: '', outputDeviceId: '' };
 const RANGE_FIELDS = [
   ['voice', 'voiceDb', ' dB'], ['music', 'music', '%'], ['reverb', 'reverbMix', '%'],
@@ -18,15 +21,39 @@ let settings = { ...DEFAULTS, ...DEVICE_DEFAULTS, videoUrl: '' };
 let captureActive = false, statusReceived = false, effectsSupported = false, stageSettingsSynced = false;
 let obsState = { connected: false, recording: false, streaming: false };
 let obsStatusKnown = false;
+let captureMode = sessionStorage.getItem('karaoke-capture-mode') === 'website' ? 'website' : 'karaoke';
+let websiteRefresh = false, obsAction = false, configuredWebsiteWindow = 0;
+let obsActionError = '';
 let syncOffsetMs = 0, syncDirty = false, syncLoaded = false, syncPending = false, syncRequestId = 0;
-try { settings = { ...settings, ...JSON.parse(localStorage.getItem(storeKey) || '{}') }; } catch {}
-settings = { ...settings, ...normalizeVoiceSettings(settings) };
+let selectedPreset = 'manual';
+const savedPresets = {};
+let audioUpdates = Promise.resolve();
+let audioEdit = 0;
+try {
+  const previous = JSON.parse(localStorage.getItem(storeKey) || '{}');
+  settings = { ...settings, ...previous, ...normalizeVoiceSettings(previous) };
+} catch {}
+try {
+  const previous = JSON.parse(localStorage.getItem(presetStoreKey) || '{}');
+  for (const id of ['manual', ...Object.keys(VOCAL_PRESETS)]) {
+    const saved = previous.profiles?.[id];
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      savedPresets[id] = vocalSettings({ ...VOCAL_PRESETS[id]?.settings, ...saved });
+    }
+  }
+  if (Object.hasOwn(VOCAL_PRESETS, previous.selected)) selectedPreset = previous.selected;
+  Object.assign(settings, savedPresets[selectedPreset] || VOCAL_PRESETS[selectedPreset]?.settings);
+} catch {}
 settings.inputDeviceId = String(settings.inputDeviceId || '');
 settings.outputDeviceId = String(settings.outputDeviceId || '');
 
 function save() {
   if (captureActive) return;
   localStorage.setItem(storeKey, JSON.stringify({ ...settings }));
+}
+
+function savePresets() {
+  localStorage.setItem(presetStoreKey, JSON.stringify({ selected: selectedPreset, profiles: savedPresets }));
 }
 
 function message(text, error = false) {
@@ -86,6 +113,7 @@ function updateObsState(data = {}) {
   obsStatusKnown = true;
   obsState = { ...obsState, connected: data.connected !== false, recording: Boolean(data.recording), streaming: Boolean(data.streaming) };
   updateSyncAvailability();
+  renderCaptureMode();
 }
 
 function updateSyncAvailability() {
@@ -154,6 +182,17 @@ const command = async (name, payload = {}) => {
   } catch (error) { message(error.message, true); return null; }
 };
 
+// Keep changes in the order the performer makes them, even during a live mic session.
+function sendAudioUpdate(name, payload) {
+  const edit = ++audioEdit;
+  audioUpdates = audioUpdates.then(async () => {
+    const result = await command(name, payload);
+    if (!result && edit === audioEdit && name === 'syncSettings') {
+      renderPreset('Stage did not respond. Select this preset again to retry.');
+    }
+  });
+}
+
 function syncControls() {
   for (const [id, key, suffix] of RANGE_FIELDS) {
     const input = $(id), output = $(`${id}Value`);
@@ -162,6 +201,34 @@ function syncControls() {
     output.textContent = `${input.value}${suffix}`;
   }
   if ($('compression')) $('compression').checked = Boolean(settings.compression);
+}
+
+function renderPreset(error = '') {
+  for (const button of presetButtons) button.setAttribute('aria-pressed', String(button.dataset.vocalPreset === selectedPreset));
+  const preset = VOCAL_PRESETS[selectedPreset];
+  $('resetVocalPreset').hidden = !preset;
+  const status = $('vocalPresetStatus');
+  status.classList.toggle('danger', Boolean(error));
+  status.textContent = error || (preset ? `${preset.label}. ${preset.description}` : 'Adjust the vocal settings below.');
+}
+
+function selectPreset(id, reset = false) {
+  if (id !== selectedPreset && selectedPreset === 'manual') savedPresets.manual = vocalSettings(settings);
+  selectedPreset = id;
+  if (reset) delete savedPresets[id];
+  const profile = savedPresets[id] || VOCAL_PRESETS[id]?.settings || vocalSettings(settings);
+  Object.assign(settings, profile);
+  syncControls();
+  savePresets();
+  renderPreset();
+  sendAudioUpdate('syncSettings', profile);
+}
+
+function saveVocalEdit(name) {
+  savedPresets[selectedPreset] = vocalSettings(settings);
+  savePresets();
+  renderPreset();
+  sendAudioUpdate(name, { value: settings[name] });
 }
 
 function setAdvancedAvailability() {
@@ -191,11 +258,14 @@ function renderDeviceSelect(id, items, selected) {
 
 function adoptStageSettings(data) {
   if (captureActive) {
-    for (const key of Object.keys(DEFAULTS)) if (data[key] !== undefined) settings[key] = data[key];
-    settings = { ...settings, ...normalizeVoiceSettings(settings) };
+    // Reopening the Control Desk must reflect an active Stage instead of applying startup defaults.
+    if (!stageSettingsSynced && audioEdit === 0) {
+      for (const key of Object.keys(DEFAULTS)) if (data[key] !== undefined) settings[key] = data[key];
+      settings = { ...settings, ...normalizeVoiceSettings(settings) };
+      syncControls();
+    }
     settings.inputDeviceId = String(data.inputDeviceId ?? settings.inputDeviceId ?? '');
     settings.outputDeviceId = String(data.outputDeviceId ?? settings.outputDeviceId ?? '');
-    syncControls();
   }
 }
 
@@ -217,7 +287,7 @@ function updateStatus(data = {}) {
   else if (data.player) message(({ playing: 'Playing', paused: 'Paused', ready: 'Song ready — press Play', loading: 'Loading video…', buffering: 'Buffering…', ended: 'Song finished' })[data.player] || 'Ready');
   if (data.ready && !stageSettingsSynced) {
     stageSettingsSynced = true;
-    if (!captureActive) command('syncSettings', { ...settings });
+    if (!captureActive && audioEdit === 0) sendAudioUpdate('syncSettings', { ...settings });
   }
   updateSyncAvailability();
 }
@@ -228,15 +298,30 @@ function bindRange(id, key, suffix) {
   input.value = settings[key]; output.textContent = `${input.value}${suffix}`;
   input.oninput = () => {
     settings[key] = Number(input.value);
-    output.textContent = `${input.value}${suffix}`;
-    save();
-    command(key, { value: settings[key] });
+    if (key === 'compressionAmount') {
+      const { threshold, ratio } = compressionPresetFromAmount(settings.compressionAmount);
+      settings.compressionThreshold = threshold;
+      settings.compressionRatio = ratio;
+    }
+    if (key === 'reverbMix') settings.reverb = settings.reverbMix;
+    syncControls();
+    if (key === 'music') {
+      save();
+      sendAudioUpdate(key, { value: settings[key] });
+    } else {
+      saveVocalEdit(key);
+    }
   };
 }
 
 for (const [id, key, suffix] of RANGE_FIELDS) bindRange(id, key, suffix);
-if ($('compression')) $('compression').onchange = () => { settings.compression = $('compression').checked; save(); command('compression', { value: settings.compression }); };
-syncControls(); setAdvancedAvailability();
+$('compression').onchange = () => {
+  settings.compression = $('compression').checked;
+  saveVocalEdit('compression');
+};
+for (const button of presetButtons) button.onclick = () => selectPreset(button.dataset.vocalPreset);
+$('resetVocalPreset').onclick = () => selectPreset(selectedPreset, true);
+syncControls(); setAdvancedAvailability(); renderPreset();
 
 $('youtubeUrl').value = settings.videoUrl;
 $('load').onclick = () => { try { const videoId = parseYouTubeUrl($('youtubeUrl').value); settings.videoUrl = $('youtubeUrl').value.trim(); save(); command('load', { videoId }); message('Loaded privately. Press Play when ready.'); } catch (error) { message(error.message, true); } };
@@ -249,6 +334,80 @@ for (const [id, key] of [['micDevice', 'inputDeviceId'], ['outputDevice', 'outpu
 function obs(path, body) { return fetch(`/api/obs/${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || 'OBS request failed.'); return data; }); }
 function appRoute(path, body = {}) { return fetch(`/api/app/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || 'App request failed.'); return data; }); }
 
+function renderCaptureMode() {
+  const website = captureMode === 'website';
+  const busy = obsAction || obsState.recording || obsState.streaming;
+  $('youtubeSource').hidden = website;
+  $('websiteSource').hidden = !website;
+  $('backingTrackLevel').hidden = website;
+  $('syncDetails').closest('.sync-panel').hidden = website;
+  $('karaokeMode').setAttribute('aria-pressed', String(!website));
+  $('websiteMode').setAttribute('aria-pressed', String(website));
+  $('karaokeMode').disabled = $('websiteMode').disabled = busy;
+  $('websiteWindow').disabled = $('refreshWebsiteWindows').disabled = busy || websiteRefresh;
+  $('obsSetup').disabled = busy;
+  $('record').disabled = obsAction || (obsState.streaming && !obsState.recording);
+  $('stop').disabled = obsAction;
+}
+
+async function refreshWebsiteWindows() {
+  if (websiteRefresh || obsAction || obsState.recording || obsState.streaming) return;
+  websiteRefresh = true;
+  renderCaptureMode();
+  const output = $('websiteStatus');
+  output.textContent = 'Looking for Chrome windows…';
+  output.classList.remove('danger');
+  try {
+    const { windows } = await obs('website-windows', {});
+    const select = $('websiteWindow');
+    const selected = select.value || sessionStorage.getItem('karaoke-website-window');
+    select.replaceChildren(new Option('Select a window', ''));
+    for (const { id, title } of windows) select.add(new Option(title, String(id)));
+    if ([...select.options].some(option => option.value === selected)) select.value = selected;
+    output.textContent = windows.length ? 'Choose a window, then use Set up OBS.' : 'Open a Chrome window with the website and refresh.';
+  } catch (error) {
+    output.textContent = error.message;
+    output.classList.add('danger');
+  } finally {
+    websiteRefresh = false;
+    renderCaptureMode();
+  }
+}
+
+function selectCaptureMode(mode) {
+  captureMode = mode;
+  obsActionError = '';
+  sessionStorage.setItem('karaoke-capture-mode', mode);
+  renderCaptureMode();
+  if (mode === 'website') refreshWebsiteWindows();
+}
+
+function recordingSource() {
+  if (captureMode === 'karaoke') return {};
+  const windowId = Number($('websiteWindow').value);
+  if (!Number.isSafeInteger(windowId) || windowId <= 0) throw Error('Choose a Chrome window in Website mode.');
+  return { mode: 'website', windowId };
+}
+
+$('karaokeMode').onclick = () => selectCaptureMode('karaoke');
+$('websiteMode').onclick = () => selectCaptureMode('website');
+$('refreshWebsiteWindows').onclick = refreshWebsiteWindows;
+$('websiteWindow').onchange = () => {
+  obsActionError = '';
+  sessionStorage.setItem('karaoke-website-window', $('websiteWindow').value);
+};
+renderCaptureMode();
+
+async function whileUpdatingObs(action) {
+  if (obsAction) return;
+  obsAction = true;
+  obsActionError = '';
+  renderCaptureMode();
+  try { await action(); }
+  catch (error) { $('obsStatus').textContent = obsActionError = error.message; }
+  finally { obsAction = false; renderCaptureMode(); }
+}
+
 function showSavedRecording(data) {
   if (!data?.savedPath) return;
   const button = $('showRecording');
@@ -256,8 +415,25 @@ function showSavedRecording(data) {
   button.dataset.savedPath = data.savedPath;
 }
 
-$('obsSetup').onclick = async () => { try { const data = await obs('setup', {}); updateObsState(data); $('obsStatus').textContent = data.error || (data.connected ? 'OBS scene ready.' : 'OBS unavailable.'); if (data.connected) loadSavedSync(); } catch (error) { updateObsState({ connected: false }); $('obsStatus').textContent = error.message; } };
-$('record').onclick = async () => { try { const current = await obs('status'); updateObsState(current); const data = await obs('record', { action: current.recording ? 'stop' : 'start' }); updateObsState(data); $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS'; showSavedRecording(data); $('obsStatus').textContent = data.savedPath ? `Saved: ${data.savedPath}` : (data.message || 'OBS updated.'); } catch (error) { $('obsStatus').textContent = error.message; } };
+$('obsSetup').onclick = () => whileUpdatingObs(async () => {
+  const source = recordingSource();
+  const data = await obs('setup', source);
+  configuredWebsiteWindow = source.windowId || 0;
+  updateObsState(data);
+  $('obsStatus').textContent = data.message || 'OBS scene ready.';
+  if (data.connected && !source.windowId) loadSavedSync();
+});
+$('record').onclick = () => whileUpdatingObs(async () => {
+  const current = await obs('status');
+  updateObsState(current);
+  const source = current.recording ? { action: 'stop' } : { action: 'start', ...recordingSource() };
+  const data = await obs('record', source);
+  if (!current.recording) configuredWebsiteWindow = source.windowId || 0;
+  updateObsState(data);
+  $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS';
+  showSavedRecording(data);
+  $('obsStatus').textContent = data.savedPath ? `Saved: ${data.savedPath}` : (data.message || 'OBS updated.');
+});
 $('showRecording').onclick = async () => { try { await appRoute('show-recording'); $('obsStatus').textContent = 'Showing the saved recording.'; } catch (error) { $('obsStatus').textContent = error.message; } };
 
 $('syncDirection').onchange = () => {
@@ -289,21 +465,25 @@ async function karaokeRefreshObs() {
     const data = await obs('status');
     updateObsState(data);
     $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS';
-    $('obsStatus').textContent = data.streaming ? 'OBS is streaming.' : data.recording ? 'OBS recording.' : data.correctScene ? 'OBS ready.' : 'Select Karaoke Live in OBS.';
+    if (obsAction) return;
+    const websiteReady = data.websiteScene && configuredWebsiteWindow > 0 && configuredWebsiteWindow === Number($('websiteWindow').value);
+    $('obsStatus').textContent = data.streaming ? 'OBS is streaming.' : data.recording ? 'OBS recording.' : obsActionError || (captureMode === 'website'
+      ? (websiteReady ? 'Website ready in OBS.' : 'Choose a Chrome window and use Set up OBS.')
+      : (data.correctScene ? 'OBS ready.' : 'Use Set up OBS for YouTube karaoke.'));
   } catch (error) {
     updateObsState({ connected: false, recording: false, streaming: false });
     $('obsStatus').textContent = error.message;
   }
 }
 
-$('stop').onclick = async () => {
+$('stop').onclick = () => whileUpdatingObs(async () => {
   try {
     const current = await obs('status');
     updateObsState(current);
     if (current.recording) { const saved = await obs('record', { action: 'stop' }); updateObsState(saved); showSavedRecording(saved); $('obsStatus').textContent = saved.savedPath ? `Saved: ${saved.savedPath}` : (saved.message || 'Recording stopped.'); }
-  } catch (error) { $('obsStatus').textContent = error.message; }
-  finally { $('record').textContent = 'Record in OBS'; command('stop'); }
-};
+  } finally { $('record').textContent = 'Record in OBS'; command('stop'); }
+});
 
 karaokeRefreshObs();
+if (captureMode === 'website') refreshWebsiteWindows();
 setInterval(karaokeRefreshObs, 1000);

@@ -5,10 +5,12 @@ const path=require('node:path');
 const {homedir}=require('node:os');
 const {connectObs}=require('./lib/obs-connector.cjs');
 const {syncPlan,applySync,matchesSync}=require('./lib/obs-sync.cjs');
+const {WEBSITE_SCENE,listWebsiteWindows,setupWebsiteScene}=require('./lib/obs-website.cjs');
 const PORT=4318,ORIGIN=`http://127.0.0.1:${PORT}`,SCENE='Karaoke Live',SCREEN='Karaoke Stage',AUDIO='Karaoke App Audio',BUNDLE='org.stevenson.karaoke-live';
 app.setName('Karaoke Live');app.setPath('userData',process.env.KARAOKE_USER_DATA_DIR ? path.resolve(process.env.KARAOKE_USER_DATA_DIR) : path.join(app.getPath('appData'),'Karaoke Live'));
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
 let stage,control,server,ownedRecording=false,previousRecordDirectory=null,quitting=false,quitReady=false,lastRecordingPath=null;
+let stageInWebsiteMode=false;
 let syncOffsetMs=0,syncApplied=false,obsMutation=Promise.resolve();
 const syncFile=()=>path.join(app.getPath('userData'),'broadcast-sync.json');
 async function loadSync(){try{const saved=JSON.parse(await fs.readFile(syncFile(),'utf8'));syncOffsetMs=syncPlan(saved.offsetMs).offsetMs;}catch{syncOffsetMs=0;}}
@@ -24,7 +26,7 @@ async function applyBroadcastSync(o,offsetMs){
 }
 const ownOrigin=url=>{try{return new URL(url).origin===ORIGIN;}catch{return false;}};
 async function obsConnection(){return connectObs();}
-async function obsStatus(o){const [r,s,c]=await Promise.all([o.request('GetRecordStatus'),o.request('GetStreamStatus'),o.request('GetCurrentProgramScene')]);return {connected:true,recording:r.outputActive,streaming:s.outputActive,scene:c.currentProgramSceneName,correctScene:c.currentProgramSceneName===SCENE,recordTimecode:r.outputTimecode};}
+async function obsStatus(o){const [r,s,c]=await Promise.all([o.request('GetRecordStatus'),o.request('GetStreamStatus'),o.request('GetCurrentProgramScene')]);return {connected:true,recording:r.outputActive,streaming:s.outputActive,scene:c.currentProgramSceneName,correctScene:c.currentProgramSceneName===SCENE,websiteScene:c.currentProgramSceneName===WEBSITE_SCENE,recordTimecode:r.outputTimecode};}
 async function ensureInput(o,inputName,inputKind,inputSettings){const list=await o.request('GetInputList');if(!list.inputs.some(i=>i.inputName===inputName))await o.request('CreateInput',{sceneName:SCENE,inputName,inputKind,inputSettings,sceneItemEnabled:true});else{await o.request('SetInputSettings',{inputName,inputSettings,overlay:true});const items=await o.request('GetSceneItemList',{sceneName:SCENE});if(!items.sceneItems.some(i=>i.sourceName===inputName))await o.request('CreateSceneItem',{sceneName:SCENE,sourceName:inputName,sceneItemEnabled:true});}}
 async function setupObs(o){
  const s=await obsStatus(o);if(ownedRecording||s.recording||s.streaming)throw Error('Stop the current OBS recording or stream before setting up karaoke.');
@@ -48,6 +50,34 @@ async function setupObs(o){
  await applyBroadcastSync(o,syncOffsetMs);
  return {...await obsStatus(o),message:'Karaoke Stage and app audio connected. OBS monitoring stays off to avoid echo.'};
 }
+async function setStageWebsiteMode(enabled){
+ if(!stage||stage.isDestroyed())throw Error('Open the Karaoke Stage window first.');
+ await stage.webContents.executeJavaScript(`window.__karaoke.setWebsiteMode(${enabled})`);
+ stageInWebsiteMode=enabled;
+}
+async function setupRecordingScene(o,body){
+ if(body.mode===undefined||body.mode==='karaoke'){
+  const result=await setupObs(o);
+  await setStageWebsiteMode(false);
+  return result;
+ }
+ if(body.mode!=='website')throw Error('Choose YouTube karaoke or Website.');
+ const {windowId}=body;
+ if(!Number.isSafeInteger(windowId)||windowId<=0)throw Error('Select a Chrome window in Website mode.');
+ if(ownedRecording)throw Error('Stop the current recording before setting up Website mode.');
+ await setupWebsiteScene(o,{windowId,layout:await stageLayout()});
+ const previousMode=stageInWebsiteMode;
+ await setStageWebsiteMode(true);
+ try{
+  await o.request('SetCurrentProgramScene',{sceneName:WEBSITE_SCENE});
+  const result=await obsStatus(o);
+  if(!result.websiteScene)throw Error('OBS did not select the Karaoke Website scene.');
+  return {...result,message:'Website and processed microphone ready in OBS.'};
+ }catch(error){
+  await setStageWebsiteMode(previousMode).catch(()=>{});
+  throw error;
+ }
+}
 async function api(route,body){
  if(route==='/api/stage/command'){
   const {SUPPORTED_STAGE_COMMANDS:allowed}=require('./lib/stage-commands.cjs');
@@ -64,14 +94,25 @@ async function api(route,body){
  if(route==='/api/app/status'){const stageOpen=!!stage&&!stage.isDestroyed();const stageStatus=stageOpen?await stage.webContents.executeJavaScript('({status:window.__karaoke?.getStatus?.()||null,actualTracks:Array.from(document.getElementById("camera")?.srcObject?.getTracks?.()||[]).map(t=>({kind:t.kind,readyState:t.readyState,enabled:t.enabled}))})'):null;return {app:'Karaoke Live',stageOpen,sampleRate:48000,stageStatus,selectedVideo:control&&!control.isDestroyed()?await control.webContents.executeJavaScript('document.getElementById("youtubeUrl")?.value||""'):''};}
  const o=await obsConnection();try{
   if(route==='/api/obs/status')return await obsStatus(o);
-  if(route==='/api/obs/setup')return await setupObs(o);
-  if(route==='/api/obs/sync')return await applyBroadcastSync(o,body.offsetMs);
+  if(route==='/api/obs/website-windows')return {windows:await listWebsiteWindows(o)};
+  if(route==='/api/obs/setup')return await setupRecordingScene(o,body);
+  if(route==='/api/obs/sync'){
+   if((await obsStatus(o)).websiteScene)throw Error('Switch to YouTube karaoke and use Set up OBS before changing its lip sync.');
+   return await applyBroadcastSync(o,body.offsetMs);
+  }
   if(route==='/api/obs/record'){
    let s=await obsStatus(o);
    if(body.action==='start'){
     if(s.recording)throw Error('OBS is already recording.');if(s.streaming)throw Error('Use OBS to manage the active stream recording.');
-    await setupObs(o);previousRecordDirectory=(await o.request('GetRecordDirectory')).recordDirectory;
-    const dir=path.join(homedir(),'Desktop','Karaoke Recordings');await fs.mkdir(dir,{recursive:true});await o.request('SetRecordDirectory',{recordDirectory:dir});await o.request('StartRecord');ownedRecording=true;return {...await obsStatus(o),message:'Recording started.'};
+    await setupRecordingScene(o,body);previousRecordDirectory=(await o.request('GetRecordDirectory')).recordDirectory;
+    const dir=path.join(homedir(),'Desktop','Karaoke Recordings');
+    try{
+     await fs.mkdir(dir,{recursive:true});await o.request('SetRecordDirectory',{recordDirectory:dir});await o.request('StartRecord');
+    }catch(error){
+     if(previousRecordDirectory)await o.request('SetRecordDirectory',{recordDirectory:previousRecordDirectory}).catch(()=>{});
+     previousRecordDirectory=null;throw error;
+    }
+    ownedRecording=true;return {...await obsStatus(o),message:'Recording started.'};
    }
    if(body.action==='stop'){
     if(!s.recording)return {...s,message:'Recording already stopped.'};if(!ownedRecording)throw Error('This recording was started outside Karaoke Live. Stop it in OBS.');

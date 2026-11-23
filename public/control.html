@@ -10,10 +10,22 @@
   <main class="control">
     <div class="brand"><h1>Karaoke Live</h1><span id="connection" class="status-chip">Stage waiting</span></div>
     <section class="panel">
-      <label for="youtubeUrl">YouTube song or karaoke video</label>
-      <div class="row"><input id="youtubeUrl" type="text" autocomplete="off" placeholder="https://youtu.be/…"><button id="load" class="primary">Load</button></div>
-      <div id="songMessage" class="status" aria-live="polite">Paste a link, then load it into the stage.</div>
-      <div class="controls"><button id="play">Play</button><button id="pause">Pause</button><button id="restart">Restart</button></div>
+      <div class="source-mode" role="group" aria-label="Stage source">
+        <button id="karaokeMode" type="button" aria-pressed="true">YouTube karaoke</button>
+        <button id="websiteMode" type="button" aria-pressed="false">Website</button>
+      </div>
+      <div id="youtubeSource">
+        <label for="youtubeUrl">YouTube song or karaoke video</label>
+        <div class="row"><input id="youtubeUrl" type="text" autocomplete="off" placeholder="https://youtu.be/…"><button id="load" class="primary">Load</button></div>
+        <div id="songMessage" class="status" aria-live="polite">Paste a link, then load it into the stage.</div>
+        <div class="controls"><button id="play">Play</button><button id="pause">Pause</button><button id="restart">Restart</button></div>
+      </div>
+      <div id="websiteSource" hidden>
+        <label for="websiteWindow">Chrome window</label>
+        <div class="row"><select id="websiteWindow"><option value="">Select a window</option></select><button id="refreshWebsiteWindows" type="button">Refresh</button></div>
+        <div id="websiteStatus" class="status" aria-live="polite">Open the site in its own Chrome window, choose it here, then use Set up OBS.</div>
+        <div class="hint">Use the website’s own playback and volume controls. OBS hears all Chrome tabs, so keep the other tabs quiet.</div>
+      </div>
     </section>
     <section class="panel">
       <div class="row"><button id="enableMedia" class="primary">Enable camera &amp; microphone</button><span id="mediaStatus" class="status-chip">Microphone off</span></div>
@@ -32,10 +44,41 @@
       <div class="row device-actions"><button id="applyDevices" type="button">Apply devices</button><span id="deviceMessage" class="hint">Apply while capture is stopped.</span></div>
     </section>
     <section class="panel">
+      <div class="vocal-presets" aria-labelledby="vocalPresetsHeading">
+        <div class="preset-heading-row">
+          <div>
+            <h2 id="vocalPresetsHeading">Vocal presets</h2>
+            <p class="hint">Choose a starting point, then shape it with the controls below.</p>
+          </div>
+          <button id="resetVocalPreset" type="button" hidden>Reset preset</button>
+        </div>
+        <div class="preset-groups">
+          <div class="preset-group" aria-labelledby="malePresetsHeading">
+            <h3 id="malePresetsHeading">Male</h3>
+            <div class="preset-buttons" role="group" aria-label="Male vocal presets">
+              <button type="button" data-vocal-preset="male-rock" aria-pressed="false">Rock Vocals</button>
+              <button type="button" data-vocal-preset="male-rap" aria-pressed="false">Rap Vocals</button>
+              <button type="button" data-vocal-preset="male-pop" aria-pressed="false">Pop Vocals</button>
+            </div>
+          </div>
+          <div class="preset-group" aria-labelledby="femalePresetsHeading">
+            <h3 id="femalePresetsHeading">Female</h3>
+            <div class="preset-buttons" role="group" aria-label="Female vocal presets">
+              <button type="button" data-vocal-preset="female-rock" aria-pressed="false">Rock Vocals</button>
+              <button type="button" data-vocal-preset="female-rap" aria-pressed="false">Rap Vocals</button>
+              <button type="button" data-vocal-preset="female-pop" aria-pressed="false">Pop Vocals</button>
+            </div>
+          </div>
+        </div>
+        <div class="preset-manual">
+          <button type="button" data-vocal-preset="manual" aria-pressed="true">Manual</button>
+          <div id="vocalPresetStatus" class="hint" aria-live="polite">Adjust the vocal settings below.</div>
+        </div>
+      </div>
       <div class="slider-line"><span>Voice</span><input id="voice" type="range" min="-12" max="18" step="1" value="0"><output id="voiceValue">0 dB</output></div>
-      <div class="slider-line"><span>Music</span><input id="music" type="range" min="0" max="100" step="1" value="65"><output id="musicValue">65%</output></div>
+      <div id="backingTrackLevel" class="slider-line"><span>Backing track</span><input id="music" type="range" min="0" max="100" step="1" value="65"><output id="musicValue">65%</output></div>
       <div class="slider-line"><span>Reverb</span><input id="reverb" type="range" min="0" max="60" step="1" value="8"><output id="reverbValue">8%</output></div>
-      <label class="check"><input id="compression" type="checkbox" checked> Gentle vocal compression</label>
+      <label class="check"><input id="compression" type="checkbox" checked> Vocal compression</label>
       <details class="voice-effects"><summary>Voice effects</summary>
         <div class="slider-line advanced-effect"><span>Compression strength</span><input data-advanced-effect id="compressionAmount" type="range" min="0" max="100" step="1" value="35"><output id="compressionAmountValue">35%</output></div>
         <div class="slider-line advanced-effect"><span>Threshold</span><input data-advanced-effect id="compressionThreshold" type="range" min="-40" max="0" step="1" value="-20"><output id="compressionThresholdValue">-20 dB</output></div>

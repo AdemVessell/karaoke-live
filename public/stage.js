@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 const bus = createBus();
 const camera = $('camera');
 let player = null, playerReady = false, queuedVideo = null, media = null, audio = null, chain = null;
+let websiteMode = false;
 let settings = { ...DEFAULTS, inputDeviceId: '', outputDeviceId: '' };let mediaStarting=false;
 let status = { ready: true, camera: false, mic: false, audio: false, player: 'idle', recording: false, ...DEFAULTS, effectsVersion: 2, micDb: -Infinity, clip: false, devices: { inputs: [], outputs: [] } };
 
@@ -103,12 +104,18 @@ async function enableMedia() {
   }finally{mediaStarting=false;}
 }
 function stopAll() { if (player?.pauseVideo) player.pauseVideo(); media?.getTracks().forEach(track => track.stop()); media = null; camera.srcObject = null;camera.removeAttribute('data-active');camera.removeAttribute('src');camera.load(); $('cameraPlaceholder').hidden = false; chain?.stop(); chain = null; audio?.close(); audio = null; $('songStatus').textContent = 'Paused'; setStatus({ camera: false, mic: false, audio: false, player: 'paused', micDb: -Infinity, clip: false, error: '' }); $('micStatus').textContent = 'Mic off'; }
+function setWebsiteMode(enabled) {
+  websiteMode = enabled;
+  document.body.classList.toggle('website-stage', enabled);
+  $('websitePlaceholder').hidden = !enabled;
+  if (enabled && playerReady) player.pauseVideo();
+}
 function execute(command, payload = {}) {
   if (command === 'load') { setStatus({player:'loading',error:''});settings.videoId = payload.videoId; initPlayer(payload.videoId).catch(error => setStatus({ player:'error',error:error.message })); }
-  else if (command === 'play') player?.playVideo?.();
+  else if (command === 'play' && !websiteMode) player?.playVideo?.();
   else if (command === 'pause') player?.pauseVideo?.();
-  else if (command === 'restart') player?.seekTo?.(0, true);
-  else if (command === 'seek') player?.seekTo?.(Math.max(0,Number(payload.seconds)||0),true);
+  else if (command === 'restart' && !websiteMode) player?.seekTo?.(0, true);
+  else if (command === 'seek' && !websiteMode) player?.seekTo?.(Math.max(0,Number(payload.seconds)||0),true);
   else if (command === 'enableMedia') enableMedia().catch(error => setStatus({ error: error.message }));
   else if (command === 'stop') stopAll();
   else if (command === 'setDevices') Promise.all([setInputDevice(payload.inputDeviceId ?? settings.inputDeviceId), setOutputDevice(payload.outputDeviceId ?? settings.outputDeviceId)]).catch(error => setStatus({ error: error.message }));
@@ -121,7 +128,7 @@ function execute(command, payload = {}) {
 }
 bus.on(message => { if (message?.type === 'command') execute(message.command, message.payload); });
 setInterval(() => { if (chain && audio) { const values = new Float32Array(chain.analyser.fftSize); chain.analyser.getFloatTimeDomainData(values); let sum = 0, peak = 0; for (const value of values) { sum += value * value; peak = Math.max(peak, Math.abs(value)); } const rms = Math.sqrt(sum / values.length) || 1e-7; setStatus({ micDb: 20 * Math.log10(rms), clip: peak >= 0.98 }); } else publish(); }, 500);
-window.__karaoke = { getStatus: () => ({ ...status, queuedVideo: settings.videoId || null, playbackTime:player?.getCurrentTime?.()||0, playbackState:player?.getPlayerState?.()??null }), getDevices: () => ({ ...status.devices }), getLayout: () => { const left=document.querySelector('.camera-panel').getBoundingClientRect(),right=document.querySelector('.song-panel').getBoundingClientRect();return {width:innerWidth,height:innerHeight,splitX:(left.right+right.left)/2}; }, execute };
+window.__karaoke = { getStatus: () => ({ ...status, queuedVideo: settings.videoId || null, playbackTime:player?.getCurrentTime?.()||0, playbackState:player?.getPlayerState?.()??null }), getDevices: () => ({ ...status.devices }), getLayout: () => { const left=document.querySelector('.camera-panel').getBoundingClientRect(),right=document.querySelector('.song-panel').getBoundingClientRect();return {width:innerWidth,height:innerHeight,splitX:(left.right+right.left)/2}; }, execute, setWebsiteMode };
 window.addEventListener('beforeunload', stopAll);
 void refreshDevices().catch(() => {});
 publish();

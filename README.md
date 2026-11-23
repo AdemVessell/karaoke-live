@@ -1,12 +1,13 @@
 # Karaoke Live
 
-A small macOS app for singing on camera with a YouTube karaoke video, low-latency vocal effects, and an OBS-ready stage.
+A small macOS app for singing or presenting on camera with low-latency vocal effects and an OBS-ready stage.
 
-The private Control Desk holds the song and audio controls. The Stage shows your camera beside the original YouTube player. Use OBS to record locally or send the Stage to your streaming service.
+The private Control Desk holds the source and audio controls. OBS can show your camera beside the YouTube karaoke player or a window from your regular Chrome session. Use OBS to record locally or send the scene to your streaming service.
 
 ## What it does
 
 - Plays a single YouTube video through the official embedded player.
+- Captures a Chrome window for browsing, commentary, or playing songs on sites such as Suno.
 - Uses your system microphone or a microphone/audio interface you select.
 - Processes your voice with compression, reverb, optional echo, and peak protection.
 - Keeps music and voice levels separately adjustable.
@@ -58,6 +59,10 @@ The output selector controls **processed voice monitoring**. YouTube follows the
 
 ## Voice effects
 
+Choose **Rock Vocals**, **Rap Vocals**, or **Pop Vocals** in either the **Male** or **Female** group. Rock uses firmer compression and a short room. Rap keeps reverb low and echo off. Pop uses a longer reverb and a light echo. Both groups are adjustable starting points. Use whichever sounds best with your voice and mic.
+
+Adjust **Voice**, **Reverb**, or the detailed **Voice effects** after selecting a preset. Changes are saved on this Mac for that preset, including edits during capture. **Reset preset** brings back its original values. **Manual** recalls your own settings, including settings from before this update. The **Backing track** level is independent of the vocal preset.
+
 - **Compression strength:** a convenient gentle-to-firm control. Advanced threshold, ratio, makeup gain, attack, and release are also available.
 - **Reverb:** adjustable send, decay, pre-delay, and tone. The wet sound is added behind the dry voice; the number is a send amount, not a guaranteed perceived wet/dry balance.
 - **Echo:** optional short delay with bounded feedback.
@@ -94,6 +99,15 @@ Mute other global microphone/desktop sources that would duplicate the Stage mix.
 ## YouTube behavior
 
 Some videos disallow embedding or are unavailable. The app reports those errors and clears stale messages after successful playback. It does not download tracks or bypass embedding restrictions. Your choice of content and broadcasting permissions remain separate from whether a video plays in the app.
+
+## Website mode
+
+1. Open Suno, YouTube, or another site in its own regular Chrome window. You can browse with your existing Chrome sign-in.
+2. In the Control Desk, choose **Website**, select that Chrome window, and click **Set up OBS**. If you opened it after the list appeared, use **Refresh**.
+3. Use the website’s own playback and volume controls. OBS puts that window beside the Stage camera and mixes browser audio with the app’s processed vocal. Keep other Chrome tabs quiet because audio capture covers all of Chrome.
+4. Use **Record in OBS** and **Stop & save** for a local take. You can change songs or navigate within the selected Chrome window during the take. Stop the take before switching back to the dedicated **YouTube karaoke** mode and setting up OBS again.
+
+The optional lip-sync editor applies to the dedicated YouTube karaoke scene. Review a short clap test in the website recording to check the camera timing with your setup.
 
 ## Privacy and local state
 
