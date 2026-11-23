@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { connectObs, readConfig, authentication } = require('../lib/obs-connector.cjs');
+const { connectObs, obsConfigPath, readConfig, authentication } = require('../lib/obs-connector.cjs');
 
 class FakeSocket {
   static instances = [];
@@ -34,4 +34,13 @@ test('connector gives bounded errors for missing or disabled OBS config', async 
 test('OBS authentication digest is deterministic without exposing the password', () => {
   const value = authentication('secret', 'salt', 'challenge');
   assert.equal(typeof value, 'string'); assert.ok(value.length > 20); assert.doesNotMatch(value, /secret|salt|challenge/);
+});
+
+test('locates OBS configuration under Windows roaming AppData and accepts a portable OBS override', () => {
+  assert.equal(obsConfigPath('win32', { APPDATA: 'D:\\Profiles\\Singer\\Roaming' }, 'C:\\Users\\Singer'),
+    'D:\\Profiles\\Singer\\Roaming\\obs-studio\\plugin_config\\obs-websocket\\config.json');
+  assert.equal(obsConfigPath('win32', {}, 'C:\\Users\\Singer'),
+    'C:\\Users\\Singer\\AppData\\Roaming\\obs-studio\\plugin_config\\obs-websocket\\config.json');
+  assert.equal(obsConfigPath('win32', { KARAOKE_OBS_CONFIG: 'D:\\Portable OBS\\config.json' }),
+    'D:\\Portable OBS\\config.json');
 });

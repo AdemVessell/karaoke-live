@@ -1,6 +1,6 @@
 # Karaoke Live
 
-A small macOS app for singing or presenting on camera with low-latency vocal effects and an OBS-ready stage.
+A small app for singing or presenting on camera with low-latency vocal effects and an OBS-ready stage.
 
 The private Control Desk holds the source and audio controls. OBS can show your camera beside the YouTube karaoke player or a window from your regular Chrome session. Use OBS to record locally or send the scene to your streaming service.
 
@@ -19,12 +19,12 @@ No OpenAI, Nuance, or other paid API key is needed. No particular audio interfac
 
 ## Requirements
 
-- macOS 13 or later for the OBS screen-and-audio capture route.
-- OBS Studio with its WebSocket server enabled under **Tools → WebSocket Server Settings**.
+- macOS 13 or later, or Windows 11 on an Intel or AMD 64-bit PC.
+- OBS Studio with its WebSocket server enabled under **Tools → WebSocket Server Settings**. Use OBS Studio 31 or later on Windows for Window Capture and Application Audio Capture.
 - Headphones, a microphone, and an internet connection for YouTube.
 - Node.js 22 or later and npm to run from source.
 
-This is a macOS prototype. Windows/Linux capture setup and a signed/notarized installer are not included.
+The macOS build is the hardware-tested version. The Windows build is a portable preview with automated checks for OBS configuration and package structure. Complete a short recording on Windows to check camera, sound, and lip sync before a full take.
 
 ## Run from source
 
@@ -43,11 +43,23 @@ npm run package:mac
 
 The result is `dist/KaraokeLive.app`. It contains the app source; it does not depend on the checkout's location. The build uses the Electron architecture installed by npm and is signed ad hoc for local testing, not notarized for distribution.
 
+## Windows quick start
+
+1. Extract the whole Windows x64 ZIP into its own folder. Open **Karaoke Live.exe** from that folder. The ZIP includes its Electron runtime.
+2. In OBS, enable the WebSocket server in **Tools → WebSocket Server Settings**. Create a **Karaoke Live** scene collection and, in **Settings → Audio**, disable global **Desktop Audio** and **Mic/Aux** for the collection to avoid duplicate audio.
+3. Set both the game or website playback output and your voice monitoring to the headphones you want to hear. In Karaoke Live, enable the camera and microphone. Keep the Stage open and unminimized. If Windows blocks access, check the desktop app permissions for **Camera** and **Microphone** in **Settings → Privacy & security**.
+4. For YouTube, load a video. For Suno and other websites, open the site in a dedicated Chrome window, then choose **Website** and select the window. Refresh the list if the selected window title changes before setup.
+5. Click **Set up OBS**, then **Record in OBS** for a short audio and video check. **Stop & save → Show recording** opens the recording location. Recordings go to **Karaoke Recordings** on your Windows Desktop, including redirected or OneDrive Desktops.
+
+To match the high-quality recording profile, set OBS to 1920×1080 at 30 fps and 48 kHz stereo. In **Settings → Output → Advanced → Recording**, choose Matroska (MKV), track 1, H.264 hardware encoding when available, and FFmpeg PCM (24-bit) when offered. These settings come from the OBS profile you select.
+
+To build the ZIP on macOS, run `npm run package:windows`. On Windows, use `py -3 scripts/package-windows.py` with Python 3.10 or later. The packager checks the official Electron download against its published SHA-256 manifest. For portable OBS, `KARAOKE_OBS_CONFIG` can point to its WebSocket `config.json`. [OBS application audio guide](https://obsproject.com/kb/application-audio-capture-guide)
+
 ## First session
 
-1. Set macOS sound output to your headphones or audio interface. If the interface has direct monitoring, avoid mixing a second dry microphone path with the app's processed voice.
+1. Set system sound output to your headphones or audio interface. If the interface has direct monitoring, avoid mixing a second dry microphone path with the app's processed voice.
 2. Open Karaoke Live. Paste a single YouTube karaoke/instrumental URL and load it.
-3. Enable camera and microphone, granting macOS permissions when asked. Refresh the device list after permission is granted if labels were previously hidden.
+3. Enable camera and microphone, granting OS permissions when asked. Refresh the device list after permission is granted if labels were previously hidden.
 4. Use the system microphone or choose another input. Device changes in the Control Desk require stopping capture first.
 5. Adjust Voice, Music, Reverb, and compression. Open **Voice effects** for detailed controls.
 6. Keep the Stage window open. Use **Set up OBS** while OBS is neither recording nor streaming. Grant OBS screen/system-audio capture permission if macOS requests it.
@@ -55,13 +67,13 @@ The result is `dist/KaraokeLive.app`. It contains the app source; it does not de
 
 If the Control Desk is hidden, use **Karaoke Live → Show controls** in the app menu.
 
-The output selector controls **processed voice monitoring**. YouTube follows the macOS sound output, so select the same headphones there. Both default to the system output.
+The output selector controls **processed voice monitoring**. YouTube follows the system sound output, so select the same headphones there. Both default to the system output.
 
 ## Voice effects
 
 Choose **Rock Vocals**, **Rap Vocals**, or **Pop Vocals** in either the **Male** or **Female** group. Rock uses firmer compression and a short room. Rap keeps reverb low and echo off. Pop uses a longer reverb and a light echo. Both groups are adjustable starting points. Use whichever sounds best with your voice and mic.
 
-Adjust **Voice**, **Reverb**, or the detailed **Voice effects** after selecting a preset. Changes are saved on this Mac for that preset, including edits during capture. **Reset preset** brings back its original values. **Manual** recalls your own settings, including settings from before this update. The **Backing track** level is independent of the vocal preset.
+Adjust **Voice**, **Reverb**, or the detailed **Voice effects** after selecting a preset. Changes are saved on this computer for that preset, including edits during capture. **Reset preset** brings back its original values. **Manual** recalls your own settings, including settings from before this update. The **Backing track** level is independent of the vocal preset.
 
 - **Compression strength:** a convenient gentle-to-firm control. Advanced threshold, ratio, makeup gain, attack, and release are also available.
 - **Reverb:** adjustable send, decay, pre-delay, and tone. The wet sound is added behind the dry voice; the number is a send amount, not a guaranteed perceived wet/dry balance.
@@ -90,7 +102,7 @@ The supported range is 0–500 ms in either direction; picture timing is limited
 
 ## OBS audio: one path
 
-Use **Karaoke Stage**, the macOS window-capture source, for picture **and audio**. Keep it unmuted, on track 1, with OBS monitoring off. The old `Karaoke App Audio` source, if present, stays muted. Targeting Electron's parent application as a separate audio source can capture silence; targeting a generic helper can capture unrelated applications.
+On macOS, **Karaoke Stage** carries picture and processed audio. On Windows, **Karaoke Stage** carries picture and **Karaoke Stage Audio** carries the app’s output via Application Audio Capture. The mix goes to track 1 with OBS monitoring off. The old `Karaoke App Audio` source, if present, stays muted.
 
 Mute other global microphone/desktop sources that would duplicate the Stage mix. The app reports active global inputs rather than silently changing unrelated audio configuration.
 
@@ -126,6 +138,7 @@ npx playwright install chromium
 npm run test:browser
 npm run package:source
 npm run package:mac
+npm run package:windows
 ```
 
 The source ZIP is created in `dist/`. Tests include device/control contracts, audio-setting normalization, and mocked OBS authentication. Recorded-audio verification results and remaining hardware checks are described in `VALIDATION.md`.

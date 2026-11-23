@@ -12,7 +12,7 @@ import { chromium } from 'playwright';
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
-function makeMockServer(runStageCommand) {
+function makeMockServer(runStageCommand, websiteWindowId = 62) {
   const commands = [];
   const obsCommands = [];
   let obsState = { connected: true, recording: false, streaming: false, correctScene: true, websiteScene: false };
@@ -38,7 +38,7 @@ function makeMockServer(runStageCommand) {
       if (request.method === 'POST') {
         const payload = JSON.parse(await readBody(request));
         obsCommands.push({ path, payload });
-        if (path === '/api/obs/website-windows') return json(response, { windows: [{ id: 62, title: 'Example Track | Suno' }] });
+        if (path === '/api/obs/website-windows') return json(response, { windows: [{ id: websiteWindowId, title: 'Example Track | Suno' }] });
         if (path === '/api/obs/setup' || payload.action === 'start') obsState = { ...obsState, websiteScene: payload.mode === 'website', correctScene: payload.mode !== 'website' };
         if (payload.action === 'start') obsState.recording = true;
         if (payload.action === 'stop') {
@@ -89,7 +89,7 @@ test('control uses the actual Stage field and device contract', async () => {
     assert.equal(await page.locator('#micDevice').count(), 1);
     assert.equal(await page.locator('#outputDevice').count(), 1);
     assert.equal(await page.locator('label[for="outputDevice"]').textContent(), 'Voice monitoring output');
-    assert.ok((await page.locator('body').textContent()).includes('YouTube follows macOS sound output'));
+    assert.ok((await page.locator('body').textContent()).includes('YouTube follows your system sound output'));
     assert.equal(await page.locator('#reverbTone').getAttribute('min'), '2000');
     assert.equal(await page.locator('#reverbTone').getAttribute('max'), '12000');
 
@@ -118,8 +118,9 @@ test('control uses the actual Stage field and device contract', async () => {
   }
 });
 
-test('Website mode binds the chosen Chrome window for recording and returns to YouTube setup', async () => {
-  const { server, obsCommands } = makeMockServer();
+test('Website mode sends the Windows Chrome window token and returns to YouTube setup', async () => {
+  const windowId = 'Example #3A Sound | Suno:Chrome_WidgetWin_1:chrome.exe';
+  const { server, obsCommands } = makeMockServer(undefined, windowId);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   try {
@@ -127,7 +128,7 @@ test('Website mode binds the chosen Chrome window for recording and returns to Y
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.address().port}/control.html`);
     await page.locator('#websiteMode').click();
-    await page.locator('#websiteWindow').selectOption('62');
+    await page.locator('#websiteWindow').selectOption(windowId);
     assert.equal(await page.locator('#youtubeSource').isHidden(), true);
     assert.equal(await page.locator('#backingTrackLevel').isHidden(), true);
     await page.locator('#obsSetup').click();
@@ -144,8 +145,8 @@ test('Website mode binds the chosen Chrome window for recording and returns to Y
     await setupBack;
     assert.deepEqual(obsCommands, [
       { path: '/api/obs/website-windows', payload: {} },
-      { path: '/api/obs/setup', payload: { mode: 'website', windowId: 62 } },
-      { path: '/api/obs/record', payload: { action: 'start', mode: 'website', windowId: 62 } },
+      { path: '/api/obs/setup', payload: { mode: 'website', windowId } },
+      { path: '/api/obs/record', payload: { action: 'start', mode: 'website', windowId } },
       { path: '/api/obs/record', payload: { action: 'stop' } },
       { path: '/api/obs/setup', payload: {} }
     ]);

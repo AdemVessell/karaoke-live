@@ -1,6 +1,6 @@
 # Validation and remaining checks
 
-Karaoke Live is a macOS prototype. The checks and remaining limits are described below.
+Karaoke Live has a hardware-tested macOS version and a Windows x64 preview. The checks and remaining limits are described below.
 
 ## Observed working
 
@@ -33,6 +33,11 @@ Karaoke Live is a macOS prototype. The checks and remaining limits are described
 - A local OBS test recorded a Chrome window playing a public Suno track. The saved 1080p30 file decoded with non-silent 48 kHz, 24-bit stereo PCM. The camera and microphone were off for that test.
 - Automated checks cover selecting the Chrome window, routing browser audio and processed voice, starting and stopping a recording, and returning to YouTube mode. Only Google Chrome is supported in Website mode. Its audio capture covers all Chrome tabs.
 - Browser tests exercise editing, switching, restoring, and resetting the six vocal presets with simulated capture. A short live take is still needed to check vocal balance and lip sync with the intended hardware.
+
+## Windows preview (0.5.0)
+
+- Automated OBS contract checks cover the Windows window selector, separate application audio for the Stage and Chrome, active scene initialization, and routing lip-sync delay to the Stage audio source.
+- The portable ZIP was built from the pinned Electron Windows x64 runtime and checked on macOS. Installing or running on Windows, live WASAPI audio, camera capture, and lip sync with physical hardware remain to be verified on Windows.
 
 ## Boundaries
 

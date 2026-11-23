@@ -2,12 +2,14 @@ const {app,BrowserWindow,session,Menu,shell}=require('electron');
 const http=require('node:http');
 const fs=require('node:fs/promises');
 const path=require('node:path');
-const {homedir}=require('node:os');
 const {connectObs}=require('./lib/obs-connector.cjs');
-const {syncPlan,applySync,matchesSync}=require('./lib/obs-sync.cjs');
+const {SCENE,syncPlan,applySync,matchesSync}=require('./lib/obs-sync.cjs');
+const {captureForPlatform}=require('./lib/obs-platform.cjs');
+const {setupKaraokeCapture}=require('./lib/obs-karaoke.cjs');
 const {WEBSITE_SCENE,listWebsiteWindows,setupWebsiteScene}=require('./lib/obs-website.cjs');
-const PORT=4318,ORIGIN=`http://127.0.0.1:${PORT}`,SCENE='Karaoke Live',SCREEN='Karaoke Stage',AUDIO='Karaoke App Audio',BUNDLE='org.stevenson.karaoke-live';
+const PORT=4318,ORIGIN=`http://127.0.0.1:${PORT}`,BUNDLE='org.stevenson.karaoke-live';
 app.setName('Karaoke Live');app.setPath('userData',process.env.KARAOKE_USER_DATA_DIR ? path.resolve(process.env.KARAOKE_USER_DATA_DIR) : path.join(app.getPath('appData'),'Karaoke Live'));
+if(process.platform==='win32')app.setAppUserModelId(BUNDLE);
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
 let stage,control,server,ownedRecording=false,previousRecordDirectory=null,quitting=false,quitReady=false,lastRecordingPath=null;
 let stageInWebsiteMode=false;
@@ -27,26 +29,9 @@ async function applyBroadcastSync(o,offsetMs){
 const ownOrigin=url=>{try{return new URL(url).origin===ORIGIN;}catch{return false;}};
 async function obsConnection(){return connectObs();}
 async function obsStatus(o){const [r,s,c]=await Promise.all([o.request('GetRecordStatus'),o.request('GetStreamStatus'),o.request('GetCurrentProgramScene')]);return {connected:true,recording:r.outputActive,streaming:s.outputActive,scene:c.currentProgramSceneName,correctScene:c.currentProgramSceneName===SCENE,websiteScene:c.currentProgramSceneName===WEBSITE_SCENE,recordTimecode:r.outputTimecode};}
-async function ensureInput(o,inputName,inputKind,inputSettings){const list=await o.request('GetInputList');if(!list.inputs.some(i=>i.inputName===inputName))await o.request('CreateInput',{sceneName:SCENE,inputName,inputKind,inputSettings,sceneItemEnabled:true});else{await o.request('SetInputSettings',{inputName,inputSettings,overlay:true});const items=await o.request('GetSceneItemList',{sceneName:SCENE});if(!items.sceneItems.some(i=>i.sourceName===inputName))await o.request('CreateSceneItem',{sceneName:SCENE,sourceName:inputName,sceneItemEnabled:true});}}
 async function setupObs(o){
  const s=await obsStatus(o);if(ownedRecording||s.recording||s.streaming)throw Error('Stop the current OBS recording or stream before setting up karaoke.');
- const scenes=await o.request('GetSceneList');if(!scenes.scenes.some(x=>x.sceneName===SCENE))await o.request('CreateScene',{sceneName:SCENE});
- await ensureInput(o,SCREEN,'screen_capture',{type:1,show_cursor:false,show_empty_names:false,show_hidden_windows:true});
- const windows=await o.request('GetInputPropertiesListPropertyItems',{inputName:SCREEN,propertyName:'window'});
- const match=windows.propertyItems.find(x=>x.itemEnabled!==false&&String(x.itemName).includes('Karaoke Live — Stage'));
- if(!match)throw Error('OBS cannot see the Karaoke Stage window yet. Keep Stage open and allow OBS Screen Recording access, then retry.');
- await o.request('SetInputSettings',{inputName:SCREEN,inputSettings:{type:1,window:match.itemValue,show_cursor:false,show_hidden_windows:true},overlay:true});
- // Window capture includes Electron's helper-process audio; bundle-only application capture was silent.
- await o.request('SetInputMute',{inputName:SCREEN,inputMuted:false});
- await o.request('SetInputVolume',{inputName:SCREEN,inputVolumeDb:0});
- await o.request('SetInputAudioMonitorType',{inputName:SCREEN,monitorType:'OBS_MONITORING_TYPE_NONE'});
- await o.request('SetInputAudioTracks',{inputName:SCREEN,inputAudioTracks:{'1':true,'2':false,'3':false,'4':false,'5':false,'6':false}});
- const filters=await o.request('GetSourceFilterList',{sourceName:SCREEN});if(!filters.filters.some(f=>f.filterName==='Karaoke peak safety'))await o.request('CreateSourceFilter',{sourceName:SCREEN,filterName:'Karaoke peak safety',filterKind:'limiter_filter',filterSettings:{threshold:-1,release_time:60}});
- const oldInputs=await o.request('GetInputList');if(oldInputs.inputs.some(i=>i.inputName===AUDIO))await o.request('SetInputMute',{inputName:AUDIO,inputMuted:true});
- const globals=await o.request('GetSpecialInputs');for(const name of Object.values(globals).filter(Boolean)){const m=await o.request('GetInputMute',{inputName:name});if(!m.inputMuted)throw Error(`OBS global audio “${name}” is active. Mute it before karaoke to avoid doubled sound.`);}
- const video=await o.request('GetVideoSettings');const item=await o.request('GetSceneItemId',{sceneName:SCENE,sourceName:SCREEN});
- await o.request('SetSceneItemTransform',{sceneName:SCENE,sceneItemId:item.sceneItemId,sceneItemTransform:{positionX:0,positionY:0,boundsType:'OBS_BOUNDS_SCALE_INNER',boundsWidth:video.baseWidth,boundsHeight:video.baseHeight,boundsAlignment:0,alignment:5}});
- await o.request('SetCurrentProgramScene',{sceneName:SCENE});
+ await setupKaraokeCapture(o);
  await applyBroadcastSync(o,syncOffsetMs);
  return {...await obsStatus(o),message:'Karaoke Stage and app audio connected. OBS monitoring stays off to avoid echo.'};
 }
@@ -63,7 +48,7 @@ async function setupRecordingScene(o,body){
  }
  if(body.mode!=='website')throw Error('Choose YouTube karaoke or Website.');
  const {windowId}=body;
- if(!Number.isSafeInteger(windowId)||windowId<=0)throw Error('Select a Chrome window in Website mode.');
+ if(captureForPlatform().windowToken(windowId)===null)throw Error('Select a Chrome window in Website mode.');
  if(ownedRecording)throw Error('Stop the current recording before setting up Website mode.');
  await setupWebsiteScene(o,{windowId,layout:await stageLayout()});
  const previousMode=stageInWebsiteMode;
@@ -105,7 +90,7 @@ async function api(route,body){
    if(body.action==='start'){
     if(s.recording)throw Error('OBS is already recording.');if(s.streaming)throw Error('Use OBS to manage the active stream recording.');
     await setupRecordingScene(o,body);previousRecordDirectory=(await o.request('GetRecordDirectory')).recordDirectory;
-    const dir=path.join(homedir(),'Desktop','Karaoke Recordings');
+    const dir=path.join(app.getPath('desktop'),'Karaoke Recordings');
     try{
      await fs.mkdir(dir,{recursive:true});await o.request('SetRecordDirectory',{recordDirectory:dir});await o.request('StartRecord');
     }catch(error){

@@ -93,6 +93,29 @@ class FakeObs {
   }
 }
 
+class WindowsFakeObs extends FakeObs {
+  constructor() {
+    super();
+    this.currentScene = 'Karaoke Live';
+    this.state.inputs['Karaoke Stage'].inputKind = 'window_capture';
+    this.state.windows = [
+      { itemEnabled: true, itemName: '[chrome.exe]: Suno — Example Track', itemValue: 'Suno — Example Track:Chrome_WidgetWin_1:chrome.exe' },
+      { itemEnabled: true, itemName: '[chrome.exe]: Docs', itemValue: 'Docs:Chrome_WidgetWin_1:chrome.exe' },
+      { itemEnabled: true, itemName: 'Karaoke Live — Stage', itemValue: 'Karaoke Live — Stage:Chrome_WidgetWin_1:Karaoke Live.exe' }
+    ];
+  }
+
+  async request(type, data = {}) {
+    if (type === 'GetCurrentProgramScene') return { currentProgramSceneName: this.currentScene };
+    if (type === 'SetCurrentProgramScene') { this.currentScene = data.sceneName; this.calls.push({ type, data: clone(data) }); return {}; }
+    if (type === 'GetSceneItemTransform' && this.currentScene !== WEBSITE_SCENE && data.sceneName === WEBSITE_SCENE) {
+      this.calls.push({ type, data: clone(data) });
+      return { sceneItemTransform: { sourceWidth: 0, sourceHeight: 0 } };
+    }
+    return super.request(type, data);
+  }
+}
+
 test('listWebsiteWindows returns enabled Google Chrome windows only', async () => {
   const obs = new FakeObs();
   assert.deepEqual(await listWebsiteWindows(obs), [
@@ -138,4 +161,31 @@ test('setupWebsiteScene configures isolated picture, Chrome audio, and camera vo
 test('setup rejects active output, active global audio, or incompatible owned sources before setup', async () => {
   await assert.rejects(setupWebsiteScene(new FakeObs({ activeGlobal: true }), { windowId: 310, layout: { width: 1280, height: 720, splitX: 704 } }), /global audio/);
   await assert.rejects(setupWebsiteScene(new FakeObs({ wrongWebsiteSource: true }), { windowId: 310, layout: { width: 1280, height: 720, splitX: 704 } }), /different type/);
+});
+
+test('Windows uses WGC window tokens, separate WASAPI audio sources, and restores the prior scene after dimension activation', async () => {
+  const obs = new WindowsFakeObs();
+  const windows = await listWebsiteWindows(obs, 'win32');
+  assert.equal(windows[0].id, 'Suno — Example Track:Chrome_WidgetWin_1:chrome.exe');
+  const result = await setupWebsiteScene(obs, { platform: 'win32', windowId: windows[0].id, layout: { width: 1280, height: 720, splitX: 704 } });
+  assert.equal(result.sources.voice, 'Website Voice');
+  assert.equal(obs.state.inputs[WEBSITE_BROWSER].inputKind, 'window_capture');
+  assert.equal(obs.state.inputs[WEBSITE_AUDIO].inputKind, 'wasapi_process_output_capture');
+  assert.equal(obs.state.inputs[WEBSITE_AUDIO].inputSettings.window, windows[0].id);
+  assert.equal(obs.state.inputs[WEBSITE_CAMERA].inputSettings.window, 'Karaoke Live — Stage:Chrome_WidgetWin_1:Karaoke Live.exe');
+  assert.equal(obs.state.inputs['Website Voice'].inputSettings.window, obs.state.inputs[WEBSITE_CAMERA].inputSettings.window);
+  assert.equal(obs.state.mutes[WEBSITE_AUDIO], false);
+  assert.equal(obs.state.mutes['Website Voice'], false);
+  assert.equal(obs.state.tracks[WEBSITE_AUDIO]['1'], true);
+  assert.equal(obs.state.tracks['Website Voice']['1'], true);
+  assert.equal(obs.state.mutes[WEBSITE_BROWSER], undefined, 'Windows picture capture must not use mixer commands');
+  assert.equal(obs.state.mutes[WEBSITE_CAMERA], undefined, 'Windows camera capture must not use mixer commands');
+  assert.equal(obs.currentScene, 'Karaoke Live');
+  assert.ok(obs.calls.some(call => call.type === 'SetCurrentProgramScene' && call.data.sceneName === WEBSITE_SCENE));
+  assert.ok(obs.calls.some(call => call.type === 'SetCurrentProgramScene' && call.data.sceneName === 'Karaoke Live'));
+});
+
+test('Windows rejects a stale or malformed selection before creating capture sources', async () => {
+  const obs = new WindowsFakeObs();
+  await assert.rejects(setupWebsiteScene(obs, { platform: 'win32', windowId: 'old:Chrome_WidgetWin_1:chrome.exe', layout: { width: 1280, height: 720, splitX: 704 } }), /Choose an open Google Chrome window/);
 });

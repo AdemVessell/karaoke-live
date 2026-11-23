@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { WINDOWS_STAGE_AUDIO } = require('../lib/obs-platform.cjs');
 const {
   applySync,
   geometry,
@@ -295,6 +296,26 @@ test('readback mismatch fails after OBS mutation instead of claiming sync applie
   await assert.rejects(applySync(obs, -150, layout()), /did not confirm the sync adjustment/);
   assert.equal(obs.state.audioOffsets[STAGE], 150);
   assert.equal(obs.findFilter(STAGE, FILTER).filterSettings.delay_ms, 150);
+});
+
+test('Windows sync delays the separate WASAPI track and keeps the camera overlay picture-only', async () => {
+  const obs = new FakeObs();
+  const window = 'Karaoke Live — Stage:Chrome_WidgetWin_1:Karaoke Live.exe';
+  for (const name of [STAGE, CAMERA]) {
+    obs.state.inputs[name] = { inputKind: 'window_capture', inputSettings: { window, capture_audio: false } };
+  }
+  obs.state.windowItems = [{ itemEnabled: true, itemValue: window }];
+
+  await applySync(obs, -150, layout(), 'win32');
+  assert.equal(obs.state.audioOffsets[WINDOWS_STAGE_AUDIO], 150);
+  assert.equal(obs.state.audioOffsets[STAGE], 0);
+  assert.equal(obs.state.inputs[CAMERA].inputSettings.capture_audio, false);
+  assert.equal(obs.findFilter(STAGE, FILTER).filterSettings.delay_ms, 150);
+  assert.equal(obs.calls.some(call => call.data.inputName === CAMERA && /Input(?:Mute|Audio)/.test(call.type)), false);
+
+  await applySync(obs, 0, layout(), 'win32');
+  assert.equal(obs.state.audioOffsets[WINDOWS_STAGE_AUDIO], 0);
+  assert.equal(obs.state.items.find(item => item.sourceName === CAMERA).sceneItemEnabled, false);
 });
 
 function assertAllowedRequests(obs) {

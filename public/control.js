@@ -22,7 +22,8 @@ let captureActive = false, statusReceived = false, effectsSupported = false, sta
 let obsState = { connected: false, recording: false, streaming: false };
 let obsStatusKnown = false;
 let captureMode = sessionStorage.getItem('karaoke-capture-mode') === 'website' ? 'website' : 'karaoke';
-let websiteRefresh = false, obsAction = false, configuredWebsiteWindow = 0;
+let websiteRefresh = false, obsAction = false, configuredWebsiteWindow = '';
+const websiteWindowIds = new Map();
 let obsActionError = '';
 let syncOffsetMs = 0, syncDirty = false, syncLoaded = false, syncPending = false, syncRequestId = 0;
 let selectedPreset = 'manual';
@@ -362,7 +363,11 @@ async function refreshWebsiteWindows() {
     const select = $('websiteWindow');
     const selected = select.value || sessionStorage.getItem('karaoke-website-window');
     select.replaceChildren(new Option('Select a window', ''));
-    for (const { id, title } of windows) select.add(new Option(title, String(id)));
+    websiteWindowIds.clear();
+    for (const { id, title } of windows) {
+      websiteWindowIds.set(String(id), id);
+      select.add(new Option(title, String(id)));
+    }
     if ([...select.options].some(option => option.value === selected)) select.value = selected;
     output.textContent = windows.length ? 'Choose a window, then use Set up OBS.' : 'Open a Chrome window with the website and refresh.';
   } catch (error) {
@@ -384,8 +389,8 @@ function selectCaptureMode(mode) {
 
 function recordingSource() {
   if (captureMode === 'karaoke') return {};
-  const windowId = Number($('websiteWindow').value);
-  if (!Number.isSafeInteger(windowId) || windowId <= 0) throw Error('Choose a Chrome window in Website mode.');
+  const windowId = websiteWindowIds.get($('websiteWindow').value);
+  if (windowId === undefined) throw Error('Choose a Chrome window in Website mode.');
   return { mode: 'website', windowId };
 }
 
@@ -418,7 +423,7 @@ function showSavedRecording(data) {
 $('obsSetup').onclick = () => whileUpdatingObs(async () => {
   const source = recordingSource();
   const data = await obs('setup', source);
-  configuredWebsiteWindow = source.windowId || 0;
+  configuredWebsiteWindow = String(source.windowId ?? '');
   updateObsState(data);
   $('obsStatus').textContent = data.message || 'OBS scene ready.';
   if (data.connected && !source.windowId) loadSavedSync();
@@ -428,7 +433,7 @@ $('record').onclick = () => whileUpdatingObs(async () => {
   updateObsState(current);
   const source = current.recording ? { action: 'stop' } : { action: 'start', ...recordingSource() };
   const data = await obs('record', source);
-  if (!current.recording) configuredWebsiteWindow = source.windowId || 0;
+  if (!current.recording) configuredWebsiteWindow = String(source.windowId ?? '');
   updateObsState(data);
   $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS';
   showSavedRecording(data);
@@ -466,7 +471,7 @@ async function karaokeRefreshObs() {
     updateObsState(data);
     $('record').textContent = data.recording ? 'Stop & save' : 'Record in OBS';
     if (obsAction) return;
-    const websiteReady = data.websiteScene && configuredWebsiteWindow > 0 && configuredWebsiteWindow === Number($('websiteWindow').value);
+    const websiteReady = data.websiteScene && configuredWebsiteWindow && configuredWebsiteWindow === $('websiteWindow').value;
     $('obsStatus').textContent = data.streaming ? 'OBS is streaming.' : data.recording ? 'OBS recording.' : obsActionError || (captureMode === 'website'
       ? (websiteReady ? 'Website ready in OBS.' : 'Choose a Chrome window and use Set up OBS.')
       : (data.correctScene ? 'OBS ready.' : 'Use Set up OBS for YouTube karaoke.'));
